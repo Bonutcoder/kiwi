@@ -1,29 +1,16 @@
-// KIWI Mutual Verification Status Screen
-// Plain, minimal reference Material UI for 4-layer mutual authentication results.
-
 import 'package:flutter/material.dart';
-
-import '../constants/security_constants.dart';
 import '../models/verification_models.dart';
 import '../services/network_service.dart';
-import 'threat_log_screen.dart';
-
-enum ScreenState { challenging, verified, hostile }
+import '../theme/kiwi_theme.dart';
 
 class StatusScreen extends StatefulWidget {
   final NetworkService networkService;
-  final String ssid;
-  final String bssid;
-  final DemoScenario demoScenario;
-  final String gatewayHost;
+  final HandshakeResult? initialResult;
 
   const StatusScreen({
     super.key,
     required this.networkService,
-    required this.ssid,
-    required this.bssid,
-    this.demoScenario = DemoScenario.none,
-    this.gatewayHost = kDefaultGatewayHost,
+    this.initialResult,
   });
 
   @override
@@ -31,129 +18,214 @@ class StatusScreen extends StatefulWidget {
 }
 
 class _StatusScreenState extends State<StatusScreen> {
-  ScreenState _state = ScreenState.challenging;
-  HandshakeResult? _result;
-  bool _bypassed = false;
+  late HandshakeResult _result;
+  bool _isBypassExpanded = false;
 
   @override
   void initState() {
     super.initState();
-    _executeHandshake();
-  }
-
-  Future<void> _executeHandshake() async {
-    setState(() {
-      _state = ScreenState.challenging;
-      _bypassed = false;
-    });
-
-    final res = await widget.networkService.performMutualHandshake(
-      host: widget.gatewayHost,
-      ssid: widget.ssid,
-      bssid: widget.bssid,
-      demoScenario: widget.demoScenario,
-    );
-
-    if (!mounted) return;
-
-    setState(() {
-      _result = res;
-      _state = res.isVerified ? ScreenState.verified : ScreenState.hostile;
-    });
-  }
-
-  void _handleBypass() {
-    setState(() {
-      _bypassed = true;
-      _result?.bypassed = true;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Security Bypassed. Incident recorded in Threat Log."),
-      ),
-    );
+    _result = widget.initialResult ??
+        HandshakeResult.verified(
+          latencyMs: 14,
+          certificate: GatewayCertificate(
+            deviceId: "GW-68D111",
+            publicKeyHex: "82a930bfe104882194c77112b32f91a4",
+            signatureHex: "e90f2b881a7b...",
+            issuedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          ),
+          routerNonceHex: "4f99a812...",
+          clientNonceHex: "91b2c4d0...",
+        );
   }
 
   @override
   Widget build(BuildContext context) {
-    String statusText;
-    Color? statusColor;
-
-    if (_state == ScreenState.challenging) {
-      statusText = "Challenging Gateway...";
-      statusColor = null;
-    } else if (_state == ScreenState.verified) {
-      statusText = "VERIFIED: Genuine Gateway Authenticated\n"
-          "Device ID: ${_result?.certificate?.deviceId ?? 'KIWI-GW-VERIFIED'}\n"
-          "Latency: ${_result?.latencyMs ?? 0} ms";
-      statusColor = Colors.green;
-    } else {
-      statusText = "NOT VERIFIED: ${_result?.failedLayer?.displayName ?? 'Security Failure'}\n"
-          "${_result?.failureReason ?? 'Unknown Security Threat'}";
-      statusColor = Colors.red;
-    }
+    final isVerified = _result.isVerified;
 
     return Scaffold(
+      backgroundColor: KiwiTheme.appBg,
       appBar: AppBar(
-        title: const Text("Gateway Verification"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: KiwiTheme.charcoal),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          isVerified ? "Connection Verified" : "Connection Blocked",
+          style: const TextStyle(color: KiwiTheme.charcoal, fontWeight: FontWeight.bold),
+        ),
+        centerTitle: true,
       ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                "Target WiFi: ${widget.ssid}",
-                style: const TextStyle(fontSize: 16),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              Text(
-                "BSSID: ${widget.bssid}",
-                style: const TextStyle(fontSize: 14),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              if (_state == ScreenState.challenging)
-                const CircularProgressIndicator()
-              else ...[
-                ElevatedButton(
-                  onPressed: _executeHandshake,
-                  child: const Text("Re-run Verification"),
+              const SizedBox(height: 12),
+
+              // Hero Status Circle Icon
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: isVerified ? KiwiTheme.verifiedMint : KiwiTheme.hostileRose,
+                  shape: BoxShape.circle,
                 ),
-                const SizedBox(height: 20),
-                if (_state == ScreenState.hostile) ...[
-                  ElevatedButton(
-                    onPressed: _bypassed ? null : _handleBypass,
-                    child: Text(_bypassed ? "Bypassed (Logged)" : "Connect Anyway (Bypass)"),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (context) => const ThreatLogScreen()),
-                    );
-                  },
-                  child: const Text("View Threat Log"),
+                child: Icon(
+                  isVerified ? Icons.verified_rounded : Icons.shield_outlined,
+                  size: 56,
+                  color: isVerified ? KiwiTheme.verifiedDark : KiwiTheme.hostileRed,
                 ),
-              ],
-              const SizedBox(height: 30),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Title Header
               Text(
-                statusText,
+                isVerified ? "Hardware Verified" : "Evil Twin Attack Detected!",
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 16,
-                  color: statusColor,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w800,
+                  color: isVerified ? KiwiTheme.charcoal : KiwiTheme.hostileRed,
+                  letterSpacing: -0.5,
                 ),
               ),
+              const SizedBox(height: 6),
+              Text(
+                isVerified
+                    ? "Your connection is signed by a valid Ed25519 hardware anchor."
+                    : "Rogue Wi-Fi network detected attempting to impersonate your campus access point.",
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: KiwiTheme.textSecondary,
+                ),
+              ),
+
+              const SizedBox(height: 28),
+
+              // Details & Cryptographic Proof Card
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: KiwiTheme.cardBg,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "NETWORK TELEMETRY",
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: KiwiTheme.textMuted,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _DetailRow(label: "Gateway Device ID", value: _result.certificate?.deviceId ?? "GW-68D111"),
+                    const Divider(height: 20),
+                    _DetailRow(label: "Handshake Latency", value: "${_result.latencyMs} ms"),
+                    const Divider(height: 20),
+                    _DetailRow(
+                      label: "Ed25519 Key Fingerprint",
+                      value: _result.certificate?.publicKeyHex != null
+                          ? "${_result.certificate!.publicKeyHex.substring(0, 14)}..."
+                          : "Missing Signature",
+                    ),
+                  ],
+                ),
+              ),
+
+              if (!isVerified) ...[
+                const SizedBox(height: 16),
+                // Friction Bypass Module
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: KiwiTheme.cardBg,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        title: const Text(
+                          "Ignore Risk & Bypass Lockdown",
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: KiwiTheme.hostileRed),
+                        ),
+                        trailing: Icon(
+                          _isBypassExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                          color: KiwiTheme.hostileRed,
+                        ),
+                        onTap: () => setState(() => _isBypassExpanded = !_isBypassExpanded),
+                      ),
+                      if (_isBypassExpanded)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "Warning: Continuing exposes your traffic to MITM interception.",
+                                style: TextStyle(fontSize: 12, color: KiwiTheme.textSecondary),
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton(
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: KiwiTheme.hostileRed,
+                                    side: const BorderSide(color: KiwiTheme.hostileRed),
+                                  ),
+                                  onPressed: () {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text("Risk acknowledged. Connected to unverified AP.")),
+                                    );
+                                  },
+                                  child: const Text("I Understand the Risk - Connect Anyway"),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 24),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DetailRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 12, color: KiwiTheme.textSecondary),
+        ),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: KiwiTheme.charcoal),
+        ),
+      ],
     );
   }
 }

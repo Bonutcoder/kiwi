@@ -1,26 +1,35 @@
-// Plain default Material Theme
 import 'package:flutter/material.dart';
 
 class KiwiTheme {
-  static const Color background = Colors.white;
-  static const Color surface = Colors.white;
-  static const Color surfaceElevated = Colors.white;
-  static const Color tealAccent = Colors.blue;
-  static const Color textPrimary = Colors.black87;
-  static const Color textSecondary = Colors.black54;
-  static const Color textMuted = Colors.black38;
+  // Canvas & Surfaces
+  static const Color appBg = Color(0xFFBAC0B9);
+  static const Color cardBg = Color(0xFFFFFFFF);
+  static const Color charcoal = Color(0xFF151719);
+  static const Color searchBg = Color(0xFFD9DED8);
 
-  static const Color verifiedBg = Colors.white;
-  static const Color verifiedBorder = Colors.green;
-  static const Color hostileBg = Colors.white;
-  static const Color hostileBorder = Colors.red;
-  static const Color challengingBg = Colors.white;
-  static const Color challengingBorder = Colors.blue;
+  // Status Colors
+  static const Color verifiedMint = Color(0xFF8CE2A8);
+  static const Color verifiedDark = Color(0xFF10B981);
+  static const Color hostileRose = Color(0xFFFECDD3);
+  static const Color hostileRed = Color(0xFFEF4444);
+  static const Color telemetryBlue = Color(0xFF0284C7);
 
-  static ThemeData get darkTheme {
+  // Text Colors
+  static const Color textPrimary = Color(0xFF151719);
+  static const Color textSecondary = Color(0xFF6B7280);
+  static const Color textMuted = Color(0xFF9CA3AF);
+
+  static ThemeData get lightTheme {
     return ThemeData(
-      useMaterial3: false,
-      primarySwatch: Colors.blue,
+      useMaterial3: true,
+      scaffoldBackgroundColor: appBg,
+      colorScheme: const ColorScheme.light(
+        primary: charcoal,
+        secondary: verifiedMint,
+        surface: cardBg,
+        error: hostileRed,
+      ),
+      fontFamily: 'Space Grotesk',
     );
   }
 }
