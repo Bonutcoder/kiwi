@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import '../models/verification_models.dart';
+import '../services/crypto_service.dart';
 import '../services/network_service.dart';
-import '../theme/kiwi_theme.dart';
+import '../services/storage_service.dart';
 import 'location_screen.dart';
 import 'scanner_screen.dart';
 import 'status_screen.dart';
+import 'threat_log_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final NetworkService networkService;
@@ -15,20 +18,28 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  String _activeSsid = "Unknown";
-  final bool _isSecured = true;
+  String _activeSsid = "Disconnected";
+  bool _isSecured = false;
+  int _threatCount = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadCurrentNetwork();
+    _loadDashboardData();
   }
 
-  Future<void> _loadCurrentNetwork() async {
+  Future<void> _loadDashboardData() async {
     final ssid = await widget.networkService.getConnectedWifiSsid();
+    final storage = StorageService(CryptoService());
+    await storage.init();
+    final logs = storage.getThreatLogs();
+    final isVerified = storage.isNetworkVerified(ssid);
+
     if (mounted) {
       setState(() {
         _activeSsid = ssid ?? "Disconnected";
+        _threatCount = logs.length;
+        _isSecured = (ssid != null && ssid.isNotEmpty) ? isVerified : false;
       });
     }
   }
@@ -36,260 +47,295 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: KiwiTheme.appBg,
+      backgroundColor: const Color(0xFFE9EDF0),
       body: SafeArea(
-        child: Stack(
-          children: [
-            // Background Watermark Graphic
-            Positioned(
-              right: -30,
-              bottom: 40,
-              child: Opacity(
-                opacity: 0.15,
-                child: Icon(
-                  Icons.wifi_lock_rounded,
-                  size: 280,
-                  color: KiwiTheme.charcoal,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // TOP SECTION: Header, Avatar, Greeting
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Top Action Bar: Brand KIWI + Connected Wi-Fi Pill
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                "KIWI",
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.5,
+                                  color: Color(0xFF111827),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(24),
+                                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.03),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        color: _isSecured
+                                            ? const Color(0xFF10B981)
+                                            : _activeSsid != "Disconnected"
+                                                ? const Color(0xFFEF4444)
+                                                : const Color(0xFF9CA3AF),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    const Icon(
+                                      Icons.wifi_rounded,
+                                      size: 14,
+                                      color: Color(0xFF111827),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    ConstrainedBox(
+                                      constraints: const BoxConstraints(maxWidth: 160),
+                                      child: Text(
+                                        _activeSsid != "Disconnected" ? "Connected: $_activeSsid" : "Disconnected",
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF111827),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          // Kiwi Bird Mascot Circle
+                          Container(
+                            width: 66,
+                            height: 66,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.06),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: CustomPaint(
+                                size: const Size(40, 40),
+                                painter: _KiwiBirdPainter(),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          // Greeting & Subtext Headline
+                          const Text(
+                            "Hi User,\nLet's secure your\nconnection.",
+                            style: TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.bold,
+                              height: 1.18,
+                              letterSpacing: -0.6,
+                              color: Color(0xFF0B0F19),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // BOTTOM SECTION (BIGGER 4 CARDS)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
+                        child: GridView.count(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 16,
+                          crossAxisSpacing: 16,
+                          childAspectRatio: 0.82,
+                          children: [
+                            // CARD 1: KIWI Scan
+                            _DashboardGridCard(
+                              iconBoxBg: const Color(0xFFF1F5F9),
+                              icon: Icons.radar_rounded,
+                              iconColor: const Color(0xFF0B0F19),
+                              title: "KIWI Scan",
+                              subtitle: "Find & Verify Wi-Fi",
+                              subtitleColor: const Color(0xFF64748B),
+                              onTap: () async {
+                                final res = await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => ScannerScreen(networkService: widget.networkService),
+                                  ),
+                                );
+                                if (res is HandshakeResult && mounted) {
+                                  setState(() => _isSecured = res.isVerified);
+                                }
+                                _loadDashboardData();
+                              },
+                            ),
+
+                            // CARD 2: Shield Status
+                            _DashboardGridCard(
+                              iconBoxBg: _isSecured ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+                              icon: _isSecured ? Icons.shield_rounded : Icons.gpp_maybe_rounded,
+                              iconColor: _isSecured ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                              title: "Shield Status",
+                              subtitle: _isSecured ? "Protected (Active)" : "Unverified (At Risk)",
+                              subtitleColor: _isSecured ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                              onTap: () async {
+                                  final res = await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => StatusScreen(
+                                        networkService: widget.networkService,
+                                        targetSsid: _activeSsid != "Disconnected" ? _activeSsid : null,
+                                      ),
+                                    ),
+                                  );
+                                if (res is HandshakeResult && mounted) {
+                                  setState(() => _isSecured = res.isVerified);
+                                }
+                                _loadDashboardData();
+                              },
+                            ),
+
+                            // CARD 3: Incident Log
+                            _DashboardGridCard(
+                              iconBoxBg: const Color(0xFFF1F5F9),
+                              icon: Icons.shield_outlined,
+                              iconColor: const Color(0xFF0B0F19),
+                              title: "Incident Log",
+                              subtitle: "$_threatCount Threats Detected",
+                              subtitleColor: const Color(0xFF64748B),
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const ThreatLogScreen(),
+                                  ),
+                                );
+                                _loadDashboardData();
+                              },
+                            ),
+
+                            // CARD 4: Location
+                            _DashboardGridCard(
+                              iconBoxBg: const Color(0xFFF1F5F9),
+                              icon: Icons.location_on_outlined,
+                              iconColor: const Color(0xFF0B0F19),
+                              title: "Location",
+                              subtitle: "Set Area",
+                              subtitleColor: const Color(0xFF64748B),
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const LocationScreen(),
+                                  ),
+                                );
+                                _loadDashboardData();
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Top Header with Kiwi Logo & Profile
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: KiwiTheme.cardBg,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.05),
-                                blurRadius: 10,
-                              ),
-                            ],
-                          ),
-                          child: const Icon(
-                            Icons.psychology_alt_rounded,
-                            color: KiwiTheme.charcoal,
-                            size: 26,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: KiwiTheme.cardBg.withValues(alpha: 0.9),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: KiwiTheme.verifiedDark,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                _activeSsid,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: KiwiTheme.charcoal,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  // Greeting Title
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      "Hi User,\nLet's secure your\nconnection.",
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w800,
-                        height: 1.1,
-                        color: KiwiTheme.charcoal,
-                        letterSpacing: -0.8,
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // 2x2 Grid of White Cards
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: GridView.count(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      crossAxisCount: 2,
-                      mainAxisSpacing: 14,
-                      crossAxisSpacing: 14,
-                      childAspectRatio: 1.15,
-                      children: [
-                        // CARD 1: Kiwi Scan
-                        _DashboardCard(
-                          icon: Icons.radar_rounded,
-                          title: "Kiwi Scan",
-                          subtitle: "Check Wi-Fi for anchor",
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => ScannerScreen(networkService: widget.networkService),
-                              ),
-                            ).then((_) => _loadCurrentNetwork());
-                          },
-                        ),
-
-                        // CARD 2: Connection Status
-                        _DashboardCard(
-                          icon: Icons.verified_user_rounded,
-                          title: "Connection\nStatus",
-                          subtitle: _isSecured ? "Secured (Green)" : "Threat Alert!",
-                          badgeColor: _isSecured ? KiwiTheme.verifiedMint : KiwiTheme.hostileRose,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => StatusScreen(networkService: widget.networkService),
-                              ),
-                            );
-                          },
-                        ),
-
-                        // CARD 3: Saved Anchors
-                        _DashboardCard(
-                          icon: Icons.bookmark_border_rounded,
-                          title: "Saved anchors",
-                          subtitle: "2 Verified nodes",
-                          onTap: () => _showSavedAnchorsSheet(context),
-                        ),
-
-                        // CARD 4: Location
-                        _DashboardCard(
-                          icon: Icons.location_on_outlined,
-                          title: "Location",
-                          subtitle: "Set campus area",
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const LocationScreen(),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showSavedAnchorsSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(24),
-        child: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Saved Hardware Anchors",
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: KiwiTheme.charcoal,
-              ),
-            ),
-            SizedBox(height: 16),
-            _AnchorTile(
-              ssid: "VIT-Campus-Secure",
-              gatewayId: "GW-68D111",
-              status: "Verified (Ed25519)",
-            ),
-            SizedBox(height: 8),
-            _AnchorTile(
-              ssid: "Kiwi-Trust-Node-1",
-              gatewayId: "GW-99F204",
-              status: "Verified (Ed25519)",
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class _DashboardCard extends StatelessWidget {
+class _DashboardGridCard extends StatelessWidget {
+  final Color iconBoxBg;
   final IconData icon;
+  final Color iconColor;
   final String title;
   final String subtitle;
-  final Color? badgeColor;
+  final Color subtitleColor;
   final VoidCallback onTap;
 
-  const _DashboardCard({
+  const _DashboardGridCard({
+    required this.iconBoxBg,
     required this.icon,
+    required this.iconColor,
     required this.title,
     required this.subtitle,
-    this.badgeColor,
+    required this.subtitleColor,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: KiwiTheme.cardBg,
-      borderRadius: BorderRadius.circular(24),
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(28),
       elevation: 0,
+      shadowColor: Colors.black.withValues(alpha: 0.05),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+        borderRadius: BorderRadius.circular(28),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.04)),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                width: 38,
-                height: 38,
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
-                  color: badgeColor ?? KiwiTheme.appBg.withValues(alpha: 0.3),
-                  shape: BoxShape.circle,
+                  color: iconBoxBg,
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                child: Icon(
-                  icon,
-                  color: KiwiTheme.charcoal,
-                  size: 22,
+                child: Center(
+                  child: Icon(
+                    icon,
+                    size: 26,
+                    color: iconColor,
+                  ),
                 ),
               ),
               Column(
@@ -300,17 +346,19 @@ class _DashboardCard extends StatelessWidget {
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      height: 1.1,
-                      color: KiwiTheme.charcoal,
+                      color: Color(0xFF0B0F19),
+                      height: 1.15,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     subtitle,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: KiwiTheme.textSecondary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w500,
+                      color: subtitleColor,
                     ),
                   ),
                 ],
@@ -323,54 +371,49 @@ class _DashboardCard extends StatelessWidget {
   }
 }
 
-class _AnchorTile extends StatelessWidget {
-  final String ssid;
-  final String gatewayId;
-  final String status;
-
-  const _AnchorTile({
-    required this.ssid,
-    required this.gatewayId,
-    required this.status,
-  });
-
+/// Custom Kiwi Bird Mascot Painter
+class _KiwiBirdPainter extends CustomPainter {
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: KiwiTheme.appBg.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.wifi_tethering_rounded, color: KiwiTheme.verifiedDark),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(ssid, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  Text("ID: $gatewayId", style: const TextStyle(fontSize: 11, color: KiwiTheme.textSecondary)),
-                ],
-              ),
-            ],
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: KiwiTheme.verifiedMint,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              status,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: KiwiTheme.charcoal),
-            ),
-          ),
-        ],
-      ),
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF111827)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final fillPaint = Paint()
+      ..color = const Color(0xFF111827)
+      ..style = PaintingStyle.fill;
+
+    final path = Path();
+    // Body curve
+    path.addOval(Rect.fromLTWH(size.width * 0.15, size.height * 0.25, size.width * 0.6, size.height * 0.55));
+    canvas.drawPath(path, paint);
+
+    // Beak
+    canvas.drawLine(
+      Offset(size.width * 0.72, size.height * 0.4),
+      Offset(size.width * 0.95, size.height * 0.52),
+      paint,
+    );
+
+    // Eye
+    canvas.drawCircle(Offset(size.width * 0.6, size.height * 0.38), 1.5, fillPaint);
+
+    // Legs
+    canvas.drawLine(
+      Offset(size.width * 0.35, size.height * 0.8),
+      Offset(size.width * 0.35, size.height * 0.95),
+      paint,
+    );
+    canvas.drawLine(
+      Offset(size.width * 0.52, size.height * 0.8),
+      Offset(size.width * 0.52, size.height * 0.95),
+      paint,
     );
   }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
