@@ -50,7 +50,7 @@ class _HostileScreenState extends State<HostileScreen> {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFEF4444).withOpacity(0.25),
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.25),
                       blurRadius: 28,
                       spreadRadius: 6,
                     ),
@@ -97,7 +97,7 @@ class _HostileScreenState extends State<HostileScreen> {
                   border: Border.all(color: const Color(0xFFFECDD3)),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFEF4444).withOpacity(0.05),
+                      color: const Color(0xFFEF4444).withValues(alpha: 0.05),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),
@@ -129,7 +129,7 @@ class _HostileScreenState extends State<HostileScreen> {
               // Friction Bypass Collapsible ExpansionTile
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.7),
+                  color: Colors.white.withValues(alpha: 0.7),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: const Color(0xFFFECDD3)),
                 ),

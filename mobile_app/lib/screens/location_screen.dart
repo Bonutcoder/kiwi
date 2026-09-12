@@ -105,7 +105,7 @@ class _LocationScreenState extends State<LocationScreen> {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF0284C7).withOpacity(0.2),
+                      color: const Color(0xFF0284C7).withValues(alpha: 0.2),
                       blurRadius: 28,
                       spreadRadius: 6,
                     ),
@@ -163,7 +163,7 @@ class _LocationScreenState extends State<LocationScreen> {
                     border: Border.all(color: const Color(0xFFE2E8F0)),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.03),
+                        color: Colors.black.withValues(alpha: 0.03),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),

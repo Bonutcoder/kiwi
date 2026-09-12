@@ -47,7 +47,7 @@ class VerifiedScreen extends StatelessWidget {
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF10B981).withOpacity(0.25),
+                      color: const Color(0xFF10B981).withValues(alpha: 0.25),
                       blurRadius: 28,
                       spreadRadius: 6,
                     ),
@@ -94,7 +94,7 @@ class VerifiedScreen extends StatelessWidget {
                   border: Border.all(color: const Color(0xFFA7F3D0)),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF10B981).withOpacity(0.05),
+                      color: const Color(0xFF10B981).withValues(alpha: 0.05),
                       blurRadius: 10,
                       offset: const Offset(0, 4),
                     ),

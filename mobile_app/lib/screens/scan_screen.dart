@@ -99,8 +99,8 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                         height: 220 + (_pulseController.value * 20),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFF0284C7).withOpacity(
-                            0.08 * (1 - _pulseController.value),
+                          color: const Color(0xFF0284C7).withValues(
+                            alpha: 0.08 * (1 - _pulseController.value),
                           ),
                         ),
                       ),
@@ -110,8 +110,8 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                         height: 170 + (_pulseController.value * 15),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFF0284C7).withOpacity(
-                            0.15 * (1 - _pulseController.value),
+                          color: const Color(0xFF0284C7).withValues(
+                            alpha: 0.15 * (1 - _pulseController.value),
                           ),
                         ),
                       ),
@@ -124,7 +124,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF0284C7).withOpacity(0.2),
+                              color: const Color(0xFF0284C7).withValues(alpha: 0.2),
                               blurRadius: 24,
                               spreadRadius: 4,
                             ),
