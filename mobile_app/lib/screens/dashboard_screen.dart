@@ -158,7 +158,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           title: "Saved anchors",
                         ),
 
-                        // Card 4: Settings
+                        // Card 4: Location
                         _buildActionCard(
                           context: context,
                           onTap: () {
@@ -170,11 +170,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             );
                           },
                           iconWidget: const Icon(
-                            Icons.settings_outlined,
+                            Icons.location_on_outlined,
                             size: 26,
                             color: Color(0xFF151719),
                           ),
-                          title: "Settings",
+                          title: "Location",
+                          subtitle: "Set campus area",
                         ),
                       ],
                     ),
