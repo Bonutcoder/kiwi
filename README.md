@@ -1,11 +1,12 @@
-# Kiwi 🛡️📶
+# Kiwi: Hardware-Verified Wi-Fi Trust Anchor 🥝📶
+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Flutter](https://img.shields.io/badge/Flutter-Client-02569B?logo=flutter)](https://flutter.dev)
 [![ESP32](https://img.shields.io/badge/ESP32-Hardware%20Anchor-E7352C?logo=espressif)](https://www.espressif.com/)
 [![Ed25519](https://img.shields.io/badge/Cryptography-Ed25519-green.svg)](https://ed25519.cr.yp.to/)
 
-SentinelNet shifts the public Wi-Fi trust model from vulnerable software-level assumptions to a **physical hardware anchor**. 
+Kiwi shifts the public Wi-Fi trust model from vulnerable software-level assumptions to a **physical hardware anchor**. 
 
 Using an ESP32 microcontroller as a cryptographic beacon and gateway, public Wi-Fi networks mathematically prove their legitimacy to a user's mobile device via deterministic **Ed25519 challenge-response signing**. If the cryptographic proof is absent, forged, or invalid (such as in an **Evil Twin** or rogue captive portal attack), the client application activates an aggressive **"Iron Gate"** lockdown to protect user credentials and network traffic.
 
@@ -22,9 +23,9 @@ Traditional countermeasures (WPA2/3 Enterprise, 802.1X certificates) are cumbers
 
 ---
 
-## 💡 The SentinelNet Solution
+## 💡 The Kiwi Solution
 
-SentinelNet introduces an out-of-band cryptographic handshake executed strictly over the Local Area Network (LAN):
+Kiwi introduces an out-of-band cryptographic handshake executed strictly over the Local Area Network (LAN):
 - **Zero Internet Dependency:** The verification happens directly over the local network created by the ESP32 gateway.
 - **Deterministic Cryptography:** Uses **Ed25519** (256-bit Edwards-curve Digital Signature Algorithm), avoiding vulnerabilities associated with weak pseudo-random number generation on microcontrollers.
 - **Replay Protection:** The mobile client (verifier) generates a unique single-use cryptographic **nonce** for every connection attempt.
@@ -59,10 +60,8 @@ SentinelNet introduces an out-of-band cryptographic handshake executed strictly 
 ```text
 kiwi/
 ├── docs/                                  # Specifications and design documents
-│   ├── SentinelNet_SRS_Document.md        # SRS & PRD specifications
-│   └── System Architecture & Data Flow.md # Architecture, roles, and roadmap
 ├── firmware/                              # ESP32 C++ / Arduino sketch
-│   └── sentinel_trust_anchor/             # AP mode & Ed25519 signing web server
+│   └── kiwi_trust_anchor/                 # AP mode & Ed25519 signing web server
 ├── mobile_app/                            # Flutter mobile verifier client
 │   ├── lib/                               # Application source code
 │   └── test/                              # Cryptographic unit tests
@@ -97,9 +96,9 @@ kiwi/
 ### 1. Hardware & Firmware Setup (`/firmware`)
 1. Open the Arduino IDE.
 2. Go to **Tools > Manage Libraries...** and search for **`Crypto` by Rhys Weatherley** (`Southern_Storm_Crypto`). Install it.
-3. Open `firmware/sentinel_trust_anchor/sentinel_trust_anchor.ino`.
+3. Open `firmware/kiwi_trust_anchor/kiwi_trust_anchor.ino`.
 4. Flash the sketch to the ESP32.
-5. The ESP32 will broadcast an Access Point (default: `SentinelNet_WiFi`) and listen for verification challenges on `http://192.168.4.1/verify`.
+5. The ESP32 will broadcast an Access Point (default: `Kiwi_WiFi`) and listen for verification challenges on `http://192.168.4.1/verify`.
 
 ---
 
@@ -127,7 +126,7 @@ kiwi/
 
 1. **Legitimate Network Demo (Green State):**
    - Connect the mobile device to the ESP32 Wi-Fi AP.
-   - Open SentinelNet and tap **Verify Network**.
+   - Open Kiwi and tap **Verify Network**.
    - The app exchanges the nonce challenge with the ESP32, verifies the signature against the pre-bundled public key, and transitions to the **Green ("Hardware Cryptography Verified")** screen.
 
 2. **Evil Twin Simulation (Red State):**
