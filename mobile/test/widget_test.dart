@@ -21,6 +21,6 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining("Hi User"), findsOneWidget);
-    expect(find.text('Kiwi Scan'), findsOneWidget);
+    expect(find.text('KIWI Scan'), findsOneWidget);
   });
 }

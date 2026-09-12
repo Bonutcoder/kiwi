@@ -123,6 +123,30 @@ class StorageService {
     await _prefs.setStringList(kThreatLogPrefsKey, rawLogs);
   }
 
+  /// Records a user-submitted security threat incident report with location
+  Future<ThreatLogEntry> reportIncident({
+    required String ssid,
+    required String bssid,
+    required String reason,
+    String? location,
+    String? deviceId,
+  }) async {
+    final entry = ThreatLogEntry(
+      id: "REP-${DateTime.now().millisecondsSinceEpoch}",
+      ssid: ssid,
+      bssid: bssid,
+      timestamp: DateTime.now(),
+      failedLayerName: "User Security Report",
+      failureReason: reason,
+      deviceId: deviceId,
+      bypassed: false,
+      location: location,
+      isReported: true,
+    );
+    await logThreat(entry);
+    return entry;
+  }
+
   List<ThreatLogEntry> getThreatLogs() {
     final rawLogs = _prefs.getStringList(kThreatLogPrefsKey) ?? [];
     final List<ThreatLogEntry> results = [];
@@ -154,6 +178,26 @@ class StorageService {
 
   Future<void> clearThreatLogs() async {
     await _prefs.remove(kThreatLogPrefsKey);
+  }
+
+  // --- Verified Networks Cache ---
+  static const String _kVerifiedNetworksKey = "kiwi_verified_networks_cache";
+
+  Future<void> setNetworkVerified(String ssid, bool isVerified) async {
+    final list = _prefs.getStringList(_kVerifiedNetworksKey) ?? [];
+    final set = list.map((e) => e.toLowerCase()).toSet();
+    if (isVerified) {
+      set.add(ssid.toLowerCase());
+    } else {
+      set.remove(ssid.toLowerCase());
+    }
+    await _prefs.setStringList(_kVerifiedNetworksKey, set.toList());
+  }
+
+  bool isNetworkVerified(String? ssid) {
+    if (ssid == null || ssid.isEmpty || ssid == "Disconnected") return false;
+    final list = _prefs.getStringList(_kVerifiedNetworksKey) ?? [];
+    return list.any((e) => e.toLowerCase() == ssid.toLowerCase());
   }
 
   // --- Revocation List (CRL) Management ---

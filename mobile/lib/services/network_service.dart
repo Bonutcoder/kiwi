@@ -3,7 +3,6 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -36,21 +35,40 @@ class NetworkService {
     http.Client? httpClient,
   }) : _httpClient = httpClient ?? http.Client();
 
-  /// Gets the currently connected Wi-Fi SSID from network_info_plus
+  /// Gets the currently connected Wi-Fi SSID from native channel or network_info_plus
   Future<String?> getConnectedWifiSsid() async {
+    // 1. Try native MethodChannel for high reliability on Android (including Android 10-16)
+    try {
+      final nativeSsid = await _wifiChannel.invokeMethod<String>('getConnectedWifiSsid');
+      if (nativeSsid != null && nativeSsid.isNotEmpty && nativeSsid != "<unknown ssid>") {
+        return nativeSsid.trim();
+      }
+    } catch (_) {}
+
+    // 2. Fallback to network_info_plus
     try {
       final name = await _networkInfo.getWifiName();
-      if (name == null || name.isEmpty) return null;
-      final clean = name.replaceAll('"', '').trim();
-      if (clean.isEmpty || clean == "<unknown ssid>") return null;
-      return clean;
-    } catch (_) {
-      return null;
-    }
+      if (name != null && name.isNotEmpty) {
+        final clean = name.replaceAll('"', '').trim();
+        if (clean.isNotEmpty && clean != "<unknown ssid>") {
+          return clean;
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Gets the currently connected Wi-Fi BSSID
   Future<String?> getConnectedWifiBssid() async {
+    // 1. Try native MethodChannel first
+    try {
+      final nativeBssid = await _wifiChannel.invokeMethod<String>('getConnectedWifiBssid');
+      if (nativeBssid != null && nativeBssid.isNotEmpty && nativeBssid != "02:00:00:00:00:00") {
+        return nativeBssid.trim();
+      }
+    } catch (_) {}
+
+    // 2. Fallback to network_info_plus
     try {
       return await _networkInfo.getWifiBSSID();
     } catch (_) {
@@ -82,78 +100,126 @@ class NetworkService {
     return finalSsid == targetSsid;
   }
 
+  /// Sends an HTTP request explicitly routed through the Wi-Fi network hardware interface on Android
+  Future<http.Response> _sendWifiRequest({
+    required String url,
+    required String method,
+    String? body,
+    int timeoutMs = 3500,
+  }) async {
+    try {
+      final res = await _wifiChannel.invokeMethod<Map<dynamic, dynamic>>('wifiHttpRequest', {
+        'url': url,
+        'method': method,
+        'body': body,
+        'timeoutMs': timeoutMs,
+      });
+      if (res != null) {
+        final statusCode = (res['statusCode'] as int?) ?? 500;
+        final responseBody = (res['body'] as String?) ?? '';
+        return http.Response(responseBody, statusCode);
+      }
+    } catch (_) {}
+
+    final uri = Uri.parse(url);
+    if (method == 'POST') {
+      return await _httpClient
+          .post(
+            uri,
+            headers: {"Content-Type": "application/json"},
+            body: body,
+          )
+          .timeout(Duration(milliseconds: timeoutMs));
+    } else {
+      return await _httpClient
+          .get(
+            uri,
+            headers: {"Accept": "application/json"},
+          )
+          .timeout(Duration(milliseconds: timeoutMs));
+    }
+  }
+
   /// Performs the complete 2-directional, 4-layer mutual authentication handshake
   Future<HandshakeResult> performMutualHandshake({
     String host = kDefaultGatewayHost,
     int port = kDefaultGatewayPort,
-    String ssid = kTargetSoftApSsid,
-    String bssid = "AA:BB:CC:DD:EE:01",
+    String? ssid,
+    String? bssid,
     DemoScenario demoScenario = DemoScenario.none,
   }) async {
+    final connectedSsid = await getConnectedWifiSsid();
+    final connectedBssid = await getConnectedWifiBssid();
+
+    final effectiveSsid = (ssid != null && ssid.isNotEmpty && ssid != "Disconnected" && ssid != "Current Wi-Fi")
+        ? ssid
+        : (connectedSsid ?? (ssid?.isNotEmpty == true ? ssid! : "Unknown Network"));
+    final effectiveBssid = (bssid != null && bssid.isNotEmpty && bssid != "00:00:00:00:00:00")
+        ? bssid
+        : (connectedBssid ?? "00:00:00:00:00:00");
+
     final stopwatch = Stopwatch()..start();
 
     // Check for simulated/demo modes for testing without physical ESP32
     if (demoScenario != DemoScenario.none) {
-      return await _simulateHandshake(demoScenario, ssid, bssid);
+      return await _simulateHandshake(demoScenario, effectiveSsid, effectiveBssid);
     }
 
-    final clientNonceHex = _cryptoService.generateNonceHex();
-    String targetHost = host;
     try {
-      final gwIp = await _networkInfo.getWifiGatewayIP();
-      if (gwIp != null && gwIp.isNotEmpty && gwIp != "0.0.0.0") {
-        targetHost = gwIp;
-      }
-    } catch (_) {}
-
-    final baseUrl = "http://$targetHost:$port";
-
-    try {
-      // -----------------------------------------------------------------------
-      // DIRECTION 1: Phone Verifies Gateway
-      // -----------------------------------------------------------------------
-      final mutualAuthUri = Uri.parse("$baseUrl$kMutualAuthEndpoint");
-      final requestBody = jsonEncode({"client_nonce": clientNonceHex});
-
-      final http.Response mutualResponse;
       try {
-        mutualResponse = await _httpClient
-            .post(
-              mutualAuthUri,
-              headers: {"Content-Type": "application/json"},
-              body: requestBody,
-            )
-            .timeout(const Duration(milliseconds: kHandshakeTimeoutMs));
-      } on TimeoutException {
+        await _wifiChannel.invokeMethod('bindProcessToWifi');
+      } catch (_) {}
+
+      final clientNonceHex = _cryptoService.generateNonceHex();
+      final List<String> candidateHosts = [];
+      try {
+        final gwIp = await _networkInfo.getWifiGatewayIP();
+        if (gwIp != null && gwIp.isNotEmpty && gwIp != "0.0.0.0") {
+          final cleanIp = gwIp.replaceAll('"', '').split('/').first.trim();
+          if (cleanIp.isNotEmpty && cleanIp != "0.0.0.0") {
+            candidateHosts.add(cleanIp);
+          }
+        }
+      } catch (_) {}
+
+      if (!candidateHosts.contains(kDefaultGatewayHost)) {
+        candidateHosts.add(kDefaultGatewayHost);
+      }
+      if (!candidateHosts.contains(host)) {
+        candidateHosts.add(host);
+      }
+
+      http.Response? mutualResponse;
+      String activeHost = candidateHosts.first;
+
+      for (final candidate in candidateHosts) {
+        final mutualAuthUrl = "http://$candidate:$port$kMutualAuthEndpoint";
+        final requestBody = jsonEncode({"client_nonce": clientNonceHex});
+
+        try {
+          final response = await _sendWifiRequest(
+            url: mutualAuthUrl,
+            method: "POST",
+            body: requestBody,
+            timeoutMs: 3500,
+          );
+
+          mutualResponse = response;
+          activeHost = candidate;
+          break;
+        } catch (_) {
+          // Try next candidate host
+        }
+      }
+
+      if (mutualResponse == null) {
         stopwatch.stop();
         return await _recordHostile(
           layer: VerificationLayer.networkTimeoutOrUnreachable,
-          reason: "Not a KIWI security gateway.",
+          reason: "No KIWI Hardware Gateway detected at ${candidateHosts.join(', ')}",
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
-          clientNonceHex: clientNonceHex,
-          failedLayers: ["Gateway Reachability & Handshake ✗"],
-        );
-      } on SocketException {
-        stopwatch.stop();
-        return await _recordHostile(
-          layer: VerificationLayer.networkTimeoutOrUnreachable,
-          reason: "Not a KIWI security gateway.",
-          latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
-          clientNonceHex: clientNonceHex,
-          failedLayers: ["Gateway Reachability & Handshake ✗"],
-        );
-      } catch (_) {
-        stopwatch.stop();
-        return await _recordHostile(
-          layer: VerificationLayer.networkTimeoutOrUnreachable,
-          reason: "Could not connect to gateway.",
-          latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           clientNonceHex: clientNonceHex,
           failedLayers: ["Gateway Reachability & Handshake ✗"],
         );
@@ -161,14 +227,16 @@ class NetworkService {
 
       if (mutualResponse.statusCode != 200) {
         final String cleanReason = (mutualResponse.statusCode == 503)
-            ? "Gateway is unprovisioned (missing Root CA certificate)."
-            : "Gateway rejected verification request.";
+            ? "Gateway is unprovisioned (missing Root CA certificate in NVS)."
+            : (mutualResponse.statusCode == 302 || mutualResponse.statusCode == 301)
+                ? "Rogue captive portal detected! AP redirects traffic instead of authenticating."
+                : "Gateway rejected verification request (HTTP ${mutualResponse.statusCode}).";
         return await _recordHostile(
           layer: VerificationLayer.layer1RootCaCertValidation,
           reason: cleanReason,
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           clientNonceHex: clientNonceHex,
           failedLayers: ["Layer 1: Root CA Signature Validation ✗"],
         );
@@ -180,10 +248,10 @@ class NetworkService {
       } catch (_) {
         return await _recordHostile(
           layer: VerificationLayer.layer1RootCaCertValidation,
-          reason: "Invalid response format received from gateway.",
+          reason: "Rogue Access Point detected! Non-cryptographic response received.",
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           clientNonceHex: clientNonceHex,
           failedLayers: ["Layer 1: Root CA Signature Validation ✗"],
         );
@@ -201,8 +269,8 @@ class NetworkService {
           layer: VerificationLayer.layer1RootCaCertValidation,
           reason: "Forged or untrusted gateway certificate! Signature fails Root CA validation.",
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           certificate: cert,
           clientNonceHex: clientNonceHex,
           passedLayers: passed,
@@ -222,8 +290,8 @@ class NetworkService {
           layer: VerificationLayer.layer2GatewaySignatureValidation,
           reason: "Rogue Access Point detected! Gateway challenge signature is invalid or forged.",
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           certificate: cert,
           clientNonceHex: clientNonceHex,
           passedLayers: passed,
@@ -243,8 +311,8 @@ class NetworkService {
           layer: VerificationLayer.layer3FreshnessReplayValidation,
           reason: "Replay attack detected! Challenge nonce stale or certificate timestamp invalid.",
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           certificate: cert,
           clientNonceHex: clientNonceHex,
           passedLayers: passed,
@@ -264,8 +332,8 @@ class NetworkService {
           layer: VerificationLayer.layer4RevocationListCheck,
           reason: "Gateway Device '${cert.deviceId}' is revoked in local CRL database!",
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           certificate: cert,
           clientNonceHex: clientNonceHex,
           passedLayers: passed,
@@ -282,23 +350,22 @@ class NetworkService {
         phoneKeyPair: _storageService.phoneKeyPair,
       );
 
-      final clientVerifyUri = Uri.parse("$baseUrl$kClientVerifyEndpoint");
+      final clientVerifyUrl = "http://$activeHost:$port$kClientVerifyEndpoint";
       final http.Response verifyResponse;
       try {
-        verifyResponse = await _httpClient
-            .post(
-              clientVerifyUri,
-              headers: {"Content-Type": "application/json"},
-              body: jsonEncode(clientPayload),
-            )
-            .timeout(const Duration(milliseconds: kHandshakeTimeoutMs));
-      } on TimeoutException {
+        verifyResponse = await _sendWifiRequest(
+          url: clientVerifyUrl,
+          method: "POST",
+          body: jsonEncode(clientPayload),
+          timeoutMs: 3500,
+        );
+      } catch (_) {
         return await _recordHostile(
           layer: VerificationLayer.networkTimeoutOrUnreachable,
-          reason: "Direction 2 (client verification) timed out exceeding ${kHandshakeTimeoutMs}ms.",
+          reason: "Direction 2 (client verification) connection failed or timed out.",
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           certificate: cert,
           clientNonceHex: clientNonceHex,
           passedLayers: passed,
@@ -311,8 +378,8 @@ class NetworkService {
           layer: VerificationLayer.direction2ClientRejection,
           reason: "Gateway rejected client authorization: HTTP ${verifyResponse.statusCode}.",
           latencyMs: stopwatch.elapsedMilliseconds,
-          ssid: ssid,
-          bssid: bssid,
+          ssid: effectiveSsid,
+          bssid: effectiveBssid,
           certificate: cert,
           clientNonceHex: clientNonceHex,
           passedLayers: passed,
@@ -330,16 +397,10 @@ class NetworkService {
         clientNonceHex: clientNonceHex,
         passedLayers: passed,
       );
-    } catch (e) {
-      stopwatch.stop();
-      return await _recordHostile(
-        layer: VerificationLayer.networkTimeoutOrUnreachable,
-        reason: "Unexpected handshake exception: $e",
-        latencyMs: stopwatch.elapsedMilliseconds,
-        ssid: ssid,
-        bssid: bssid,
-        clientNonceHex: clientNonceHex,
-      );
+    } finally {
+      try {
+        await _wifiChannel.invokeMethod('unbindProcess');
+      } catch (_) {}
     }
   }
 

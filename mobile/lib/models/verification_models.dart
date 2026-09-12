@@ -185,6 +185,8 @@ class ThreatLogEntry {
   final String failureReason;
   final String? deviceId;
   final bool bypassed;
+  final String? location;
+  final bool isReported;
 
   ThreatLogEntry({
     required this.id,
@@ -195,6 +197,8 @@ class ThreatLogEntry {
     required this.failureReason,
     this.deviceId,
     required this.bypassed,
+    this.location,
+    this.isReported = false,
   });
 
   factory ThreatLogEntry.fromJson(Map<String, dynamic> json) {
@@ -208,6 +212,8 @@ class ThreatLogEntry {
       failureReason: json['failure_reason'] as String? ?? 'Unknown Threat',
       deviceId: json['device_id'] as String?,
       bypassed: json['bypassed'] as bool? ?? false,
+      location: json['location'] as String?,
+      isReported: json['is_reported'] as bool? ?? false,
     );
   }
 
@@ -220,6 +226,8 @@ class ThreatLogEntry {
         'failure_reason': failureReason,
         'device_id': deviceId,
         'bypassed': bypassed,
+        'location': location,
+        'is_reported': isReported,
       };
 }
 
