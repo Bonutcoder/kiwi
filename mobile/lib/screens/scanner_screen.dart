@@ -1,5 +1,5 @@
-// KIWI Wi-Fi Scanner Screen
-// Scans for nearby Open/Unencrypted Access Points and provides manual/demo gateways
+// KIWI Wi-Fi Scanner & Authenticator Screen
+// Clean, focused interface for scanning Wi-Fi access points and verifying hardware gateway authenticity.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -10,7 +10,6 @@ import '../models/verification_models.dart';
 import '../services/network_service.dart';
 import '../theme/kiwi_theme.dart';
 import 'status_screen.dart';
-import 'threat_log_screen.dart';
 
 class ScannerScreen extends StatefulWidget {
   final NetworkService networkService;
@@ -29,57 +28,29 @@ class ScannerScreen extends StatefulWidget {
 class _ScannerScreenState extends State<ScannerScreen> {
   bool _isScanning = false;
   List<ApScanItem> _accessPoints = [];
-  bool _hardwareScanAvailable = true;
-  String _customHost = kDefaultGatewayHost;
-  final TextEditingController _customHostController =
-      TextEditingController(text: kDefaultGatewayHost);
+  String _gatewayHost = kDefaultGatewayHost;
+  final TextEditingController _hostController = TextEditingController(text: kDefaultGatewayHost);
 
-  // Fallback demo APs for non-hardware or emulator testing
-  final List<ApScanItem> _fallbackAps = [
+  // Default target AP entry if hardware scan returns empty
+  final List<ApScanItem> _defaultTargetAps = [
     ApScanItem(
       ssid: kTargetSoftApSsid,
-      bssid: "CC:50:E3:8A:2B:10",
+      bssid: "68:D1:11:8A:2B:10",
       rssi: -45,
       isOpen: true,
       isTargetKiwiZone: true,
-    ),
-    ApScanItem(
-      ssid: "Airport-Free-Public-WiFi",
-      bssid: "02:1A:11:F4:99:A2",
-      rssi: -62,
-      isOpen: true,
-      isTargetKiwiZone: false,
-    ),
-    ApScanItem(
-      ssid: "CoffeeShop_Guest_Open",
-      bssid: "74:DA:38:21:55:01",
-      rssi: -71,
-      isOpen: true,
-      isTargetKiwiZone: false,
-    ),
-    ApScanItem(
-      ssid: "Metropolitan_Transit_WiFi",
-      bssid: "E4:8D:8C:11:00:FE",
-      rssi: -84,
-      isOpen: true,
-      isTargetKiwiZone: false,
     ),
   ];
 
   @override
   void initState() {
     super.initState();
-    if (widget.autoScan) {
-      _startScan();
-    } else {
-      _accessPoints = _fallbackAps;
-      _hardwareScanAvailable = false;
-    }
+    _startScan();
   }
 
   @override
   void dispose() {
-    _customHostController.dispose();
+    _hostController.dispose();
     super.dispose();
   }
 
@@ -89,50 +60,41 @@ class _ScannerScreenState extends State<ScannerScreen> {
     try {
       final canScan = await WiFiScan.instance
           .canStartScan()
-          .timeout(const Duration(milliseconds: 500));
+          .timeout(const Duration(milliseconds: 1000));
+
       if (canScan == CanStartScan.yes) {
         await WiFiScan.instance.startScan();
         final results = await WiFiScan.instance.getScannedResults();
-        
-        // Filter for open (unencrypted) APs
-        final openAps = results
-            .where((ap) => ap.capabilities.contains("[ESS]") && !ap.capabilities.contains("WPA") && !ap.capabilities.contains("WEP"))
-            .map((ap) => ApScanItem(
-                  ssid: ap.ssid.isEmpty ? "<Hidden SSID>" : ap.ssid,
-                  bssid: ap.bssid,
-                  rssi: ap.level,
-                  isOpen: true,
-                  isTargetKiwiZone: ap.ssid == kTargetSoftApSsid,
-                ))
-            .toList();
+
+        final openAps = results.map((ap) => ApScanItem(
+          ssid: ap.ssid.isEmpty ? "<Hidden Network>" : ap.ssid,
+          bssid: ap.bssid,
+          rssi: ap.level,
+          isOpen: !ap.capabilities.contains("WPA") && !ap.capabilities.contains("WEP"),
+          isTargetKiwiZone: ap.ssid == kTargetSoftApSsid,
+        )).toList();
 
         setState(() {
-          _hardwareScanAvailable = true;
-          _accessPoints = openAps.isNotEmpty ? openAps : _fallbackAps;
+          _accessPoints = openAps.isNotEmpty ? openAps : _defaultTargetAps;
           _isScanning = false;
         });
       } else {
-        // Fallback for emulators/desktop without Wi-Fi scanning hardware permission
         setState(() {
-          _hardwareScanAvailable = false;
-          _accessPoints = _fallbackAps;
+          _accessPoints = _defaultTargetAps;
           _isScanning = false;
         });
       }
     } catch (_) {
       setState(() {
-        _hardwareScanAvailable = false;
-        _accessPoints = _fallbackAps;
+        _accessPoints = _defaultTargetAps;
         _isScanning = false;
       });
     }
   }
 
-  void _navigateToVerification({
+  void _verifyGateway({
     required String ssid,
     required String bssid,
-    DemoScenario demoScenario = DemoScenario.none,
-    String? customHost,
   }) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -140,8 +102,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
           networkService: widget.networkService,
           ssid: ssid,
           bssid: bssid,
-          demoScenario: demoScenario,
-          gatewayHost: customHost ?? _customHost,
+          gatewayHost: _gatewayHost.isNotEmpty ? _gatewayHost : kDefaultGatewayHost,
         ),
       ),
     );
@@ -171,345 +132,259 @@ class _ScannerScreenState extends State<ScannerScreen> {
             ),
           ],
         ),
-        actions: [
-          IconButton(
-            tooltip: "Threat Audit Log",
-            icon: const Icon(Icons.security, color: KiwiTheme.textPrimary),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const ThreatLogScreen()),
-              );
-            },
-          ),
-          IconButton(
-            tooltip: "Rescan APs",
-            icon: _isScanning
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: KiwiTheme.tealAccent),
-                  )
-                : const Icon(Icons.refresh, color: KiwiTheme.textPrimary),
-            onPressed: _isScanning ? null : _startScan,
-          ),
-        ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        children: [
-          // Trust Banner
-          _buildTrustBanner(),
-          const SizedBox(height: 16),
-
-          // Direct Hardware Gateway Connection Card
-          _buildDirectConnectCard(),
-          const SizedBox(height: 16),
-
-          // Simulation / Evaluation Matrix Card
-          _buildDemoMatrixCard(),
-          const SizedBox(height: 20),
-
-          // Nearby Open Networks Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                "Nearby Open Networks (${_accessPoints.length})",
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: KiwiTheme.textSecondary,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              if (!_hardwareScanAvailable)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Text(
-                    "Demo Fallback",
-                    style: TextStyle(fontSize: 10, color: Colors.amber, fontWeight: FontWeight.bold),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
+              // Main Scan Action Card
+              _buildScanHeaderCard(),
+              const SizedBox(height: 16),
 
-          // AP List
-          ..._accessPoints.map(_buildApItem),
-          const SizedBox(height: 30),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTrustBanner() {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: KiwiTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: KiwiTheme.surfaceElevated),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.verified_user_outlined, color: KiwiTheme.tealAccent, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Zero-Trust Access Point Verification",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: KiwiTheme.textPrimary),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  "Every gateway must cryptographically prove it holds an authentic KIWI Root CA certificate before your device exposes network traffic.",
-                  style: TextStyle(fontSize: 12, color: KiwiTheme.textSecondary, height: 1.3),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDirectConnectCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: KiwiTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KiwiTheme.tealAccent.withValues(alpha: 0.4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.router, color: KiwiTheme.tealAccent, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                "Physical ESP32 Gateway Verification",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: KiwiTheme.textPrimary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            "Connect to SoftAP 'KIWI-Secure-Zone' then verify endpoint at 192.168.4.1:",
-            style: TextStyle(fontSize: 12, color: KiwiTheme.textSecondary),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _customHostController,
-                  style: const TextStyle(fontSize: 13, color: KiwiTheme.textPrimary),
-                  decoration: InputDecoration(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    isDense: true,
-                    hintText: "192.168.4.1",
-                    filled: true,
-                    fillColor: KiwiTheme.background,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: KiwiTheme.surfaceElevated),
+              // Discovered Wi-Fi Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    "Discovered Wi-Fi Networks (${_accessPoints.length})",
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: KiwiTheme.textSecondary,
                     ),
                   ),
-                  onChanged: (val) => _customHost = val.trim(),
-                ),
+                  if (_isScanning)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: KiwiTheme.tealAccent),
+                    ),
+                ],
               ),
-              const SizedBox(width: 10),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.security, size: 16),
-                label: const Text("Verify"),
-                onPressed: () {
-                  _navigateToVerification(
-                    ssid: kTargetSoftApSsid,
-                    bssid: "ESP32:GW:01",
-                    customHost: _customHost.isNotEmpty ? _customHost : kDefaultGatewayHost,
-                  );
-                },
+              const SizedBox(height: 10),
+
+              // Networks List
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _accessPoints.length,
+                  itemBuilder: (context, index) {
+                    final ap = _accessPoints[index];
+                    return _buildApCard(ap);
+                  },
+                ),
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildDemoMatrixCard() {
+  Widget _buildScanHeaderCard() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: KiwiTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: KiwiTheme.surfaceElevated),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: KiwiTheme.tealAccent.withValues(alpha: 0.3)),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Row(
             children: [
-              Icon(Icons.science_outlined, color: Colors.purpleAccent, size: 18),
-              SizedBox(width: 8),
+              Icon(Icons.wifi_find_rounded, color: KiwiTheme.tealAccent, size: 24),
+              SizedBox(width: 10),
               Text(
-                "Threat Simulation & Evaluation Mode",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: KiwiTheme.textPrimary),
+                "Wi-Fi Security Scanner",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: KiwiTheme.textPrimary),
               ),
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            "Evaluate full 4-layer defense without physical ESP32 attached:",
-            style: TextStyle(fontSize: 11, color: KiwiTheme.textSecondary),
+          const Text(
+            "Scan for nearby Wi-Fi networks and cryptographically authenticate hardware gateways against Evil Twin attacks.",
+            style: TextStyle(fontSize: 12, color: KiwiTheme.textSecondary, height: 1.3),
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          const SizedBox(height: 14),
+
+          // Gateway IP Field
+          Row(
             children: [
-              _buildDemoButton(
-                label: "Pass (Legitimate)",
-                color: KiwiTheme.verifiedBorder,
-                scenario: DemoScenario.legitimateGateway,
-              ),
-              _buildDemoButton(
-                label: "Fail L1 (Forged Root)",
-                color: KiwiTheme.hostileBorder,
-                scenario: DemoScenario.evilTwinForgedRootSignature,
-              ),
-              _buildDemoButton(
-                label: "Fail L2 (Bad Sig)",
-                color: KiwiTheme.hostileBorder,
-                scenario: DemoScenario.evilTwinInvalidGatewaySig,
-              ),
-              _buildDemoButton(
-                label: "Fail L3 (Replay)",
-                color: Colors.amber,
-                scenario: DemoScenario.evilTwinReplayAttack,
-              ),
-              _buildDemoButton(
-                label: "Fail L4 (Revoked)",
-                color: Colors.orangeAccent,
-                scenario: DemoScenario.evilTwinRevokedDevice,
-              ),
-              _buildDemoButton(
-                label: "Fail (>2000ms Timeout)",
-                color: Colors.redAccent,
-                scenario: DemoScenario.timeoutFailure,
+              const Text("Gateway IP: ", style: TextStyle(fontSize: 12, color: KiwiTheme.textSecondary)),
+              Expanded(
+                child: SizedBox(
+                  height: 36,
+                  child: TextField(
+                    controller: _hostController,
+                    style: const TextStyle(fontSize: 12, color: KiwiTheme.textPrimary),
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                      isDense: true,
+                      hintText: "192.168.4.1",
+                      filled: true,
+                      fillColor: KiwiTheme.background,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(color: KiwiTheme.surfaceElevated),
+                      ),
+                    ),
+                    onChanged: (val) => _gatewayHost = val.trim(),
+                  ),
+                ),
               ),
             ],
+          ),
+          const SizedBox(height: 14),
+
+          // Primary Scan Button
+          SizedBox(
+            height: 48,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: KiwiTheme.tealAccent,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: _isScanning
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
+                    )
+                  : const Icon(Icons.wifi_find, size: 20),
+              label: Text(
+                _isScanning ? "Scanning Networks..." : "Scan Wi-Fi Networks",
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+              onPressed: _isScanning ? null : _startScan,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDemoButton({
-    required String label,
-    required Color color,
-    required DemoScenario scenario,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onTap: () {
-        _navigateToVerification(
-          ssid: "SIMULATED: ${scenario.name}",
-          bssid: "SIM:00:11:22:33:44",
-          demoScenario: scenario,
-        );
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          border: Border.all(color: color.withValues(alpha: 0.5)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.bold),
+  Widget _buildApCard(ApScanItem ap) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: KiwiTheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: ap.isTargetKiwiZone
+              ? KiwiTheme.tealAccent.withValues(alpha: 0.5)
+              : KiwiTheme.surfaceElevated,
+          width: ap.isTargetKiwiZone ? 1.5 : 1.0,
         ),
       ),
-    );
-  }
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _verifyGateway(ssid: ap.ssid, bssid: ap.bssid),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                // Wi-Fi Icon
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: ap.isTargetKiwiZone
+                        ? KiwiTheme.tealAccent.withValues(alpha: 0.15)
+                        : KiwiTheme.background,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.wifi,
+                    color: ap.isTargetKiwiZone ? KiwiTheme.tealAccent : KiwiTheme.textMuted,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
 
-  Widget _buildApItem(ApScanItem ap) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Container(
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: ap.isTargetKiwiZone
-                ? KiwiTheme.tealAccent.withValues(alpha: 0.15)
-                : KiwiTheme.background,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.wifi,
-            color: ap.isTargetKiwiZone ? KiwiTheme.tealAccent : KiwiTheme.textMuted,
-            size: 22,
-          ),
-        ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                ap.ssid,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                overflow: TextOverflow.ellipsis,
-              ),
+                // Details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              ap.ssid,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: KiwiTheme.textPrimary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (ap.isTargetKiwiZone)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: KiwiTheme.tealAccent.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: KiwiTheme.tealAccent.withValues(alpha: 0.4)),
+                              ),
+                              child: const Text(
+                                "KIWI Gateway",
+                                style: TextStyle(color: KiwiTheme.tealAccent, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text(
+                            ap.bssid,
+                            style: const TextStyle(fontSize: 11, color: KiwiTheme.textMuted, fontFamily: 'monospace'),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            "${ap.rssi} dBm",
+                            style: const TextStyle(fontSize: 11, color: KiwiTheme.textMuted),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            ap.isOpen ? "Open" : "Secured",
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: ap.isOpen ? Colors.amber : KiwiTheme.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 8),
+
+                // Action Verify Button
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: ap.isTargetKiwiZone ? KiwiTheme.tealAccent : KiwiTheme.surfaceElevated,
+                    foregroundColor: ap.isTargetKiwiZone ? Colors.black : KiwiTheme.textPrimary,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text("Verify", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  onPressed: () => _verifyGateway(ssid: ap.ssid, bssid: ap.bssid),
+                ),
+              ],
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
-              ),
-              child: const Text(
-                "Unverified",
-                style: TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Row(
-            children: [
-              Text(
-                ap.bssid,
-                style: const TextStyle(fontSize: 11, color: KiwiTheme.textMuted, fontFamily: 'monospace'),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                "${ap.rssi} dBm",
-                style: const TextStyle(fontSize: 11, color: KiwiTheme.textMuted),
-              ),
-            ],
           ),
         ),
-        trailing: const Icon(Icons.chevron_right, color: KiwiTheme.textMuted),
-        onTap: () {
-          _navigateToVerification(
-            ssid: ap.ssid,
-            bssid: ap.bssid,
-            customHost: _customHost,
-          );
-        },
       ),
     );
   }
