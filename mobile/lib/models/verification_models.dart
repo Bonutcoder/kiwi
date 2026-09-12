@@ -22,7 +22,7 @@ extension VerificationLayerExtension on VerificationLayer {
       case VerificationLayer.layer4RevocationListCheck:
         return "Layer 4: Revocation List Check";
       case VerificationLayer.networkTimeoutOrUnreachable:
-        return "Transport: 2000ms Timeout";
+        return "Gateway Unreachable";
       case VerificationLayer.direction2ClientRejection:
         return "Direction 2: Client Verification";
     }
@@ -39,7 +39,7 @@ extension VerificationLayerExtension on VerificationLayer {
       case VerificationLayer.layer4RevocationListCheck:
         return "Gateway Device ID matches a revoked entry in the Certificate Revocation List (CRL).";
       case VerificationLayer.networkTimeoutOrUnreachable:
-        return "Gateway failed to complete mutual handshake within the 2000ms security window.";
+        return "Gateway connection timed out or is unreachable.";
       case VerificationLayer.direction2ClientRejection:
         return "Gateway rejected phone client authorization challenge (HTTP 403).";
     }
@@ -114,6 +114,8 @@ class HandshakeResult {
   final String? routerNonceHex;
   final String? clientNonceHex;
   final DateTime timestamp;
+  final List<String> passedLayers;
+  final List<String> failedLayers;
   bool bypassed;
 
   HandshakeResult({
@@ -126,6 +128,8 @@ class HandshakeResult {
     this.routerNonceHex,
     this.clientNonceHex,
     DateTime? timestamp,
+    this.passedLayers = const [],
+    this.failedLayers = const [],
     this.bypassed = false,
   }) : timestamp = timestamp ?? DateTime.now();
 
@@ -134,6 +138,7 @@ class HandshakeResult {
     required GatewayCertificate certificate,
     required String routerNonceHex,
     required String clientNonceHex,
+    List<String> passedLayers = const [],
   }) {
     return HandshakeResult(
       isVerified: true,
@@ -142,6 +147,7 @@ class HandshakeResult {
       certificate: certificate,
       routerNonceHex: routerNonceHex,
       clientNonceHex: clientNonceHex,
+      passedLayers: passedLayers,
     );
   }
 
@@ -152,6 +158,8 @@ class HandshakeResult {
     GatewayCertificate? certificate,
     String? routerNonceHex,
     String? clientNonceHex,
+    List<String> passedLayers = const [],
+    List<String> failedLayers = const [],
   }) {
     return HandshakeResult(
       isVerified: false,
@@ -162,6 +170,8 @@ class HandshakeResult {
       certificate: certificate,
       routerNonceHex: routerNonceHex,
       clientNonceHex: clientNonceHex,
+      passedLayers: passedLayers,
+      failedLayers: failedLayers,
     );
   }
 }

@@ -1,5 +1,5 @@
 // KIWI Wi-Fi Scanner & Gateway Authenticator
-// Plain, minimal Material UI for Wi-Fi scanning, connection, and gateway verification.
+// Plain, minimal reference Material UI for Wi-Fi scanning, connection, and gateway verification.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -175,44 +175,35 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text("KIWI"),
       ),
-      body: SafeArea(
+      body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(20.0),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Top Action Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: (_isScanning || _connectingSsid != null || _isVerifying)
-                      ? null
-                      : _scanWifiNetworks,
-                  child: Text(_isScanning ? "Scanning Wi-Fi..." : "Scan Wi-Fi"),
-                ),
+              Text(
+                _connectedSsid != null ? "Connected WiFi: $_connectedSsid" : "Not connected to WiFi",
+                style: const TextStyle(fontSize: 16),
+                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 24),
-
-              // Wi-Fi List or Status Message
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: (_isScanning || _connectingSsid != null || _isVerifying) ? null : _scanWifiNetworks,
+                child: Text(_isScanning ? "Scanning WiFi..." : "Scan WiFi"),
+              ),
+              const SizedBox(height: 20),
               if (_isScanning)
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(20.0),
-                    child: CircularProgressIndicator(),
-                  ),
-                )
+                const CircularProgressIndicator()
               else if (_accessPoints.isEmpty)
-                Center(
-                  child: Text(
-                    "No Wi-Fi Networks Found",
-                    style: textTheme.bodyLarge,
-                  ),
+                const Text(
+                  "No WiFi networks found",
+                  style: TextStyle(fontSize: 16),
+                  textAlign: TextAlign.center,
                 )
               else
                 Expanded(
@@ -221,86 +212,36 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     separatorBuilder: (context, index) => const Divider(),
                     itemBuilder: (context, index) {
                       final ap = _accessPoints[index];
-                      return _buildApTile(ap);
+                      final isConnectingToThis = _connectingSsid == ap.ssid;
+                      final inlineErr = _inlineErrors[ap.ssid];
+
+                      return ListTile(
+                        title: Text(ap.ssid),
+                        subtitle: Text(
+                          "${ap.bssid} • ${ap.rssi} dBm${inlineErr != null ? '\nError: $inlineErr' : ''}",
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ElevatedButton(
+                              onPressed: (isConnectingToThis || _isVerifying) ? null : () => _connectToNetwork(ap),
+                              child: Text(isConnectingToThis ? "Connecting..." : "Connect"),
+                            ),
+                            const SizedBox(width: 8),
+                            ElevatedButton(
+                              onPressed: _isVerifying ? null : () => _verifyGateway(ssid: ap.ssid, bssid: ap.bssid),
+                              child: Text(_isVerifying ? "Verifying..." : "Verify"),
+                            ),
+                          ],
+                        ),
+                      );
                     },
                   ),
                 ),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildApTile(ApScanItem ap) {
-    final isConnectedToThis = _connectedSsid == ap.ssid;
-    final isConnectingToThis = _connectingSsid == ap.ssid;
-    final inlineErr = _inlineErrors[ap.ssid];
-    final textTheme = Theme.of(context).textTheme;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    ap.ssid,
-                    style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                  ),
-                ),
-                if (isConnectedToThis)
-                  const Text(
-                    "CONNECTED",
-                    style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
-                  ),
-              ],
-            ),
-            subtitle: Text(
-              "${ap.bssid} • ${ap.rssi} dBm",
-              style: textTheme.bodySmall,
-            ),
-          ),
-          if (inlineErr != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      inlineErr,
-                      style: const TextStyle(color: Colors.red, fontSize: 12),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: isConnectingToThis ? null : () => _connectToNetwork(ap),
-                    child: const Text("Retry"),
-                  ),
-                ],
-              ),
-            ),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: (isConnectingToThis || _isVerifying) ? null : () => _connectToNetwork(ap),
-                  child: Text(isConnectingToThis ? "Connecting..." : "Connect"),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _isVerifying ? null : () => _verifyGateway(ssid: ap.ssid, bssid: ap.bssid),
-                  child: Text(_isVerifying ? "Verifying..." : "Verify"),
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }

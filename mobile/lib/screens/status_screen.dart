@@ -1,5 +1,5 @@
 // KIWI Mutual Verification Status Screen
-// Plain, minimal Material UI for 4-layer mutual authentication results.
+// Plain, minimal reference Material UI for 4-layer mutual authentication results.
 
 import 'package:flutter/material.dart';
 
@@ -70,154 +70,86 @@ class _StatusScreenState extends State<StatusScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text("Security Bypassed. Threat entry recorded in Threat Audit Log."),
+        content: Text("Security Bypassed. Incident recorded in Threat Log."),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
+    String statusText;
+    Color? statusColor;
+
+    if (_state == ScreenState.challenging) {
+      statusText = "Challenging Gateway...";
+      statusColor = null;
+    } else if (_state == ScreenState.verified) {
+      statusText = "VERIFIED: Genuine Gateway Authenticated\n"
+          "Device ID: ${_result?.certificate?.deviceId ?? 'KIWI-GW-VERIFIED'}\n"
+          "Latency: ${_result?.latencyMs ?? 0} ms";
+      statusColor = Colors.green;
+    } else {
+      statusText = "NOT VERIFIED: ${_result?.failedLayer?.displayName ?? 'Security Failure'}\n"
+          "${_result?.failureReason ?? 'Unknown Security Threat'}";
+      statusColor = Colors.red;
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: const Text("Gateway Verification"),
-        actions: [
-          IconButton(
-            tooltip: "Threat Audit Log",
-            icon: const Icon(Icons.list_alt),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const ThreatLogScreen()),
-              );
-            },
-          ),
-        ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 32.0),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Target Network Meta Info
               Text(
-                widget.ssid,
-                style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                "Target WiFi: ${widget.ssid}",
+                style: const TextStyle(fontSize: 16),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 20),
               Text(
-                "BSSID: ${widget.bssid} • Host: ${widget.gatewayHost}",
-                style: textTheme.bodySmall,
+                "BSSID: ${widget.bssid}",
+                style: const TextStyle(fontSize: 14),
                 textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 30),
-
-              // Single Centered Status Display Text
-              if (_state == ScreenState.challenging) ...[
-                const CircularProgressIndicator(),
-                const SizedBox(height: 24),
-                Text(
-                  "Verifying Gateway...",
-                  style: textTheme.titleLarge,
-                  textAlign: TextAlign.center,
+              const SizedBox(height: 20),
+              if (_state == ScreenState.challenging)
+                const CircularProgressIndicator()
+              else ...[
+                ElevatedButton(
+                  onPressed: _executeHandshake,
+                  child: const Text("Re-run Verification"),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  "Conducting 4-layer Ed25519 mutual authentication (2000ms SLA)",
-                  style: textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-              ] else if (_state == ScreenState.verified) ...[
-                const Text(
-                  "VERIFIED",
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.green,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  "Genuine Gateway Authenticated",
-                  style: textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  "Device ID: ${_result?.certificate?.deviceId ?? 'KIWI-GW-VERIFIED'}\n"
-                  "Latency: ${_result?.latencyMs ?? 0} ms\n"
-                  "All 4 Verification Layers Passed",
-                  style: textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-              ] else ...[
-                const Text(
-                  "NOT VERIFIED",
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.red,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  _result?.failedLayer?.displayName ?? "Security Failure",
-                  style: textTheme.titleMedium?.copyWith(color: Colors.redAccent),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  _result?.failureReason ?? "Unknown Security Threat",
-                  style: textTheme.bodyMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  "Threat incident auto-logged to Threat Audit Log.",
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-
-              const SizedBox(height: 36),
-
-              // Stacked Buttons
-              if (_state != ScreenState.challenging) ...[
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _executeHandshake,
-                    child: const Text("Re-run Verification"),
-                  ),
-                ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 20),
                 if (_state == ScreenState.hostile) ...[
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: _bypassed ? null : _handleBypass,
-                      child: Text(_bypassed ? "Bypassed (Logged)" : "Connect Anyway (Bypass)"),
-                    ),
+                  ElevatedButton(
+                    onPressed: _bypassed ? null : _handleBypass,
+                    child: Text(_bypassed ? "Bypassed (Logged)" : "Connect Anyway (Bypass)"),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
                 ],
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (context) => const ThreatLogScreen()),
-                      );
-                    },
-                    child: const Text("View Threat Log"),
-                  ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (context) => const ThreatLogScreen()),
+                    );
+                  },
+                  child: const Text("View Threat Log"),
                 ),
               ],
+              const SizedBox(height: 30),
+              Text(
+                statusText,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: statusColor,
+                ),
+              ),
             ],
           ),
         ),

@@ -1,5 +1,5 @@
 // KIWI Threat Audit Log Screen
-// Plain, minimal Material UI for forensic threat logs.
+// Plain, minimal reference Material UI for forensic threat logs.
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -74,69 +74,57 @@ class _ThreatLogScreenState extends State<ThreatLogScreen> {
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
-    final textTheme = Theme.of(context).textTheme;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text("Threat Audit Log"),
-        actions: [
-          if (_logs.isNotEmpty)
-            TextButton(
-              onPressed: _clearLogs,
-              child: const Text("Purge All", style: TextStyle(color: Colors.redAccent)),
-            ),
-        ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _logs.isEmpty
-              ? Center(
-                  child: Text(
-                    "No Threat Incidents Detected",
-                    style: textTheme.bodyLarge,
-                  ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (_logs.isNotEmpty) ...[
+                ElevatedButton(
+                  onPressed: _clearLogs,
+                  child: const Text("Purge Audit Log"),
+                ),
+                const SizedBox(height: 20),
+              ],
+              if (_isLoading)
+                const CircularProgressIndicator()
+              else if (_logs.isEmpty)
+                const Text(
+                  "No threat incidents recorded",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16),
                 )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16.0),
-                  itemCount: _logs.length,
-                  separatorBuilder: (context, index) => const Divider(),
-                  itemBuilder: (context, index) {
-                    final item = _logs[index];
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              item.failedLayerName,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: item.bypassed ? Colors.orange : Colors.red,
-                              ),
-                            ),
-                          ),
-                          Text(
-                            item.bypassed ? "BYPASSED" : "BLOCKED",
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: item.bypassed ? Colors.orange : Colors.red,
-                            ),
-                          ),
-                        ],
-                      ),
-                      subtitle: Padding(
-                        padding: const EdgeInsets.only(top: 4.0),
-                        child: Text(
+              else
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: _logs.length,
+                    separatorBuilder: (context, index) => const Divider(),
+                    itemBuilder: (context, index) {
+                      final item = _logs[index];
+                      return ListTile(
+                        title: Text(item.failedLayerName),
+                        subtitle: Text(
                           "${item.failureReason}\n"
                           "SSID: ${item.ssid} • BSSID: ${item.bssid}\n"
-                          "Time: ${dateFormat.format(item.timestamp)}",
-                          style: textTheme.bodySmall,
+                          "Time: ${dateFormat.format(item.timestamp)} "
+                          "(${item.bypassed ? 'BYPASSED' : 'BLOCKED'})",
+                          style: const TextStyle(fontSize: 12),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
