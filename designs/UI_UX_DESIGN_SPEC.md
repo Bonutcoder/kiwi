@@ -33,7 +33,7 @@ All UI screens are stored and editable in your **Stitch** project (**`Kiwi Mobil
 
 | Screen | Stitch Screen ID | Description |
 | :--- | :--- | :--- |
-| **Mobile Dashboard (1:1 Replica)** | `d79b13637ff646a0b6afd37a98dbb716` | Exact match to `dashboard.jpeg` with Kiwi bird logo, headline greeting, 2x2 grid (`Sentinel Scan`, `Connection Status`, `Saved anchors`, `Location`), search bar, lower-right watermark, floating dock & `+` button. |
+| **Mobile Dashboard (1:1 Replica)** | `d79b13637ff646a0b6afd37a98dbb716` | Exact match to `dashboard.jpeg` with Kiwi bird logo, headline greeting, 2x2 grid (`Kiwi Scan`, `Connection Status`, `Saved anchors`, `Location`), search bar, lower-right watermark, floating dock & `+` button. |
 | **Location Detection** | `80e28cca001c41ba990fb40b48a7c674` | Auto-detected location (*VIT University, Vellore*), compass radar graphic, and **"Enter Location Manually"** fallback button & dialog. |
 | **Scan / Verification** | `b114080984114bd9a6559e69f788c0f6` | Central Wi-Fi orb radar pulse visual with single **"Verify Network"** CTA. |
 | **Verified State (Green UI)** | `47cc9e4dffe547bea3c3b284b26deb40` | *"Connection Verified"*, *"Hardware Trust Anchor Confirmed"*, and Ed25519 cryptographic proof card. |
