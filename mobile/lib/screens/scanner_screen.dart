@@ -1,8 +1,9 @@
 // KIWI Wi-Fi Scanner & Gateway Authenticator
-// Real Wi-Fi scanning for ALL nearby access points with direct Connect & Gateway Verification actions.
+// Displays ONLY REAL, live nearby Wi-Fi networks with direct Connect & Gateway Verification actions. Zero fake entries.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:network_info_plus/network_info_plus.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
 import '../constants/security_constants.dart';
@@ -29,6 +30,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
   bool _isScanning = false;
   List<ApScanItem> _accessPoints = [];
   String? _statusMessage;
+  final NetworkInfo _networkInfo = NetworkInfo();
 
   @override
   void initState() {
@@ -42,7 +44,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
       _statusMessage = null;
     });
 
+    final List<ApScanItem> realAps = [];
+
     try {
+      // 1. Try Hardware Wi-Fi Scan
       final canStart = await WiFiScan.instance.canStartScan(askPermissions: true);
       if (canStart == CanStartScan.yes) {
         await WiFiScan.instance.startScan();
@@ -51,65 +56,56 @@ class _ScannerScreenState extends State<ScannerScreen> {
       final canGet = await WiFiScan.instance.canGetScannedResults(askPermissions: true);
       if (canGet == CanGetScannedResults.yes) {
         final results = await WiFiScan.instance.getScannedResults();
-        
-        final scannedAps = results.map((ap) => ApScanItem(
-          ssid: ap.ssid.isEmpty ? "<Hidden Network>" : ap.ssid,
-          bssid: ap.bssid,
-          rssi: ap.level,
-          isOpen: !ap.capabilities.contains("WPA") && !ap.capabilities.contains("WEP"),
-          isTargetKiwiZone: ap.ssid == kTargetSoftApSsid,
-        )).toList();
 
-        setState(() {
-          _accessPoints = scannedAps;
-          _isScanning = false;
-          if (scannedAps.isEmpty) {
-            _statusMessage = "No Wi-Fi networks found nearby. Ensure Location and Wi-Fi are enabled.";
-          }
-        });
-      } else {
-        // Fallback for desktop/emulators or when permissions are limited
-        _loadFallbackOrNearbyAps();
+        for (final ap in results) {
+          final ssidStr = ap.ssid.trim();
+          if (ssidStr.isEmpty || ssidStr == "<Hidden Network>") continue;
+
+          realAps.add(ApScanItem(
+            ssid: ssidStr,
+            bssid: ap.bssid,
+            rssi: ap.level,
+            isOpen: !ap.capabilities.contains("WPA") && !ap.capabilities.contains("WEP"),
+            isTargetKiwiZone: ssidStr == kTargetSoftApSsid,
+          ));
+        }
       }
-    } catch (e) {
-      _loadFallbackOrNearbyAps();
+    } catch (_) {
+      // Ignore scan exceptions and fallback to active connection query below
     }
-  }
 
-  void _loadFallbackOrNearbyAps() {
-    // Standard list of nearby detected networks for platforms without raw Wi-Fi scan capabilities
+    // 2. Also query currently connected Wi-Fi interface (if any)
+    try {
+      final connectedSsid = await _networkInfo.getWifiName();
+      final connectedBssid = await _networkInfo.getWifiBSSID();
+
+      if (connectedSsid != null && connectedSsid.isNotEmpty) {
+        final cleanSsid = connectedSsid.replaceAll('"', '').trim();
+        if (cleanSsid.isNotEmpty && !realAps.any((item) => item.ssid == cleanSsid)) {
+          realAps.insert(
+            0,
+            ApScanItem(
+              ssid: cleanSsid,
+              bssid: connectedBssid ?? "00:00:00:00:00:00",
+              rssi: -40,
+              isOpen: true,
+              isTargetKiwiZone: cleanSsid == kTargetSoftApSsid,
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      // Ignore connection query exceptions
+    }
+
+    if (!mounted) return;
+
     setState(() {
-      _accessPoints = [
-        ApScanItem(
-          ssid: kTargetSoftApSsid,
-          bssid: "68:D1:11:8A:2B:10",
-          rssi: -45,
-          isOpen: true,
-          isTargetKiwiZone: true,
-        ),
-        ApScanItem(
-          ssid: "Home_WiFi_5G",
-          bssid: "1A:2B:3C:4D:5E:6F",
-          rssi: -58,
-          isOpen: false,
-          isTargetKiwiZone: false,
-        ),
-        ApScanItem(
-          ssid: "Public_Free_WiFi",
-          bssid: "00:11:22:33:44:55",
-          rssi: -64,
-          isOpen: true,
-          isTargetKiwiZone: false,
-        ),
-        ApScanItem(
-          ssid: "Office_Guest_Network",
-          bssid: "AA:BB:CC:DD:EE:FF",
-          rssi: -72,
-          isOpen: false,
-          isTargetKiwiZone: false,
-        ),
-      ];
+      _accessPoints = realAps;
       _isScanning = false;
+      if (realAps.isEmpty) {
+        _statusMessage = "No active Wi-Fi networks detected. Make sure Wi-Fi & Location are enabled on your device, then tap 'Scan Wi-Fi Networks'.";
+      }
     });
   }
 
@@ -182,7 +178,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Primary Scan Action Card (Clean, no IP fields)
+              // Primary Scan Action Card
               _buildScanCard(),
               const SizedBox(height: 16),
 
@@ -191,7 +187,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    "Discovered Networks (${_accessPoints.length})",
+                    "Real Wi-Fi Networks (${_accessPoints.length})",
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -209,23 +205,55 @@ class _ScannerScreenState extends State<ScannerScreen> {
               const SizedBox(height: 10),
 
               if (_statusMessage != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Text(
-                    _statusMessage!,
-                    style: const TextStyle(fontSize: 12, color: Colors.amber),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: KiwiTheme.surface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: KiwiTheme.surfaceElevated),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Colors.amber, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _statusMessage!,
+                          style: const TextStyle(fontSize: 12, color: KiwiTheme.textSecondary, height: 1.3),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
 
-              // Networks List
+              // Real Networks List
               Expanded(
-                child: ListView.builder(
-                  itemCount: _accessPoints.length,
-                  itemBuilder: (context, index) {
-                    final ap = _accessPoints[index];
-                    return _buildApCard(ap);
-                  },
-                ),
+                child: _accessPoints.isEmpty && !_isScanning
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.wifi_off, size: 48, color: KiwiTheme.textMuted.withValues(alpha: 0.5)),
+                            const SizedBox(height: 12),
+                            const Text(
+                              "No Wi-Fi Networks Discovered",
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: KiwiTheme.textSecondary),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              "Tap 'Scan Wi-Fi Networks' to scan nearby access points.",
+                              style: TextStyle(fontSize: 12, color: KiwiTheme.textMuted),
+                            ),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: _accessPoints.length,
+                        itemBuilder: (context, index) {
+                          final ap = _accessPoints[index];
+                          return _buildApCard(ap);
+                        },
+                      ),
               ),
             ],
           ),
@@ -257,7 +285,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            "Scan all available nearby Wi-Fi networks. Connect to a network or verify its gateway authenticity.",
+            "Scan all real nearby Wi-Fi networks. Connect to a network or verify its gateway authenticity.",
             style: TextStyle(fontSize: 12, color: KiwiTheme.textSecondary, height: 1.3),
           ),
           const SizedBox(height: 14),
