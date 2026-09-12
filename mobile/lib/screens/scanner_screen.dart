@@ -1,5 +1,5 @@
 // KIWI Wi-Fi Scanner & Gateway Authenticator
-// Minimalist UI: Real Wi-Fi network scanner with Connect and Verify buttons for each network.
+// Plain, minimal Material UI for Wi-Fi scanning, connection, and gateway verification.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -9,7 +9,6 @@ import 'package:wifi_scan/wifi_scan.dart';
 import '../constants/security_constants.dart';
 import '../models/verification_models.dart';
 import '../services/network_service.dart';
-import '../theme/kiwi_theme.dart';
 import 'status_screen.dart';
 
 class ScannerScreen extends StatefulWidget {
@@ -77,7 +76,6 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
     final List<ApScanItem> realAps = [];
 
-    // Include currently connected network if present
     if (_connectedSsid != null && _connectedSsid!.isNotEmpty) {
       realAps.add(
         ApScanItem(
@@ -141,7 +139,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
     setState(() {
       _connectingSsid = null;
       if (!success && _connectedSsid != ap.ssid) {
-        _inlineErrors[ap.ssid] = "Could not verify connection to '${ap.ssid}'. Select network in settings and retry.";
+        _inlineErrors[ap.ssid] = "Could not connect to ${ap.ssid}. Select network in Wi-Fi settings.";
       } else {
         _inlineErrors.remove(ap.ssid);
       }
@@ -177,66 +175,56 @@ class _ScannerScreenState extends State<ScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text("KIWI", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20)),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: KiwiTheme.tealAccent,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              ),
-              icon: _isScanning
-                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                  : const Icon(Icons.search, size: 18),
-              label: Text(_isScanning ? "Scanning..." : "Scan Wi-Fi", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-              onPressed: (_isScanning || _connectingSsid != null || _isVerifying) ? null : _scanWifiNetworks,
-            ),
-          ),
-        ],
+        title: const Text("KIWI"),
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.all(24.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_isScanning)
-                const LinearProgressIndicator(color: KiwiTheme.tealAccent, minHeight: 3),
-
-              const SizedBox(height: 10),
-
-              // Real Scanned Wi-Fi Networks List
-              Expanded(
-                child: _accessPoints.isEmpty && !_isScanning
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.wifi_off_rounded, size: 48, color: KiwiTheme.textMuted),
-                            const SizedBox(height: 12),
-                            const Text("No Wi-Fi Networks Discovered", style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: KiwiTheme.textSecondary)),
-                            const SizedBox(height: 16),
-                            ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(backgroundColor: KiwiTheme.tealAccent, foregroundColor: Colors.black),
-                              icon: const Icon(Icons.search),
-                              label: const Text("Scan Wi-Fi", style: TextStyle(fontWeight: FontWeight.bold)),
-                              onPressed: _scanWifiNetworks,
-                            ),
-                          ],
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: _accessPoints.length,
-                        itemBuilder: (context, index) {
-                          final ap = _accessPoints[index];
-                          return _buildApCard(ap);
-                        },
-                      ),
+              // Top Action Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: (_isScanning || _connectingSsid != null || _isVerifying)
+                      ? null
+                      : _scanWifiNetworks,
+                  child: Text(_isScanning ? "Scanning Wi-Fi..." : "Scan Wi-Fi"),
+                ),
               ),
+              const SizedBox(height: 24),
+
+              // Wi-Fi List or Status Message
+              if (_isScanning)
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(20.0),
+                    child: CircularProgressIndicator(),
+                  ),
+                )
+              else if (_accessPoints.isEmpty)
+                Center(
+                  child: Text(
+                    "No Wi-Fi Networks Found",
+                    style: textTheme.bodyLarge,
+                  ),
+                )
+              else
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: _accessPoints.length,
+                    separatorBuilder: (context, index) => const Divider(),
+                    itemBuilder: (context, index) {
+                      final ap = _accessPoints[index];
+                      return _buildApTile(ap);
+                    },
+                  ),
+                ),
             ],
           ),
         ),
@@ -244,148 +232,75 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
-  Widget _buildApCard(ApScanItem ap) {
+  Widget _buildApTile(ApScanItem ap) {
     final isConnectedToThis = _connectedSsid == ap.ssid;
     final isConnectingToThis = _connectingSsid == ap.ssid;
     final inlineErr = _inlineErrors[ap.ssid];
+    final textTheme = Theme.of(context).textTheme;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: KiwiTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isConnectedToThis ? KiwiTheme.tealAccent : KiwiTheme.surfaceElevated,
-          width: isConnectedToThis ? 1.8 : 1.0,
-        ),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Row(
               children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: isConnectedToThis ? KiwiTheme.tealAccent.withValues(alpha: 0.18) : KiwiTheme.background,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.wifi,
-                    color: isConnectedToThis ? KiwiTheme.tealAccent : KiwiTheme.textMuted,
-                    size: 20,
-                  ),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              ap.ssid,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: KiwiTheme.textPrimary),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (isConnectedToThis)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: KiwiTheme.tealAccent.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text("CONNECTED", style: TextStyle(color: KiwiTheme.tealAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        "${ap.bssid}  •  ${ap.rssi} dBm",
-                        style: const TextStyle(fontSize: 11, color: KiwiTheme.textMuted, fontFamily: 'monospace'),
-                      ),
-                    ],
+                  child: Text(
+                    ap.ssid,
+                    style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
+                if (isConnectedToThis)
+                  const Text(
+                    "CONNECTED",
+                    style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
               ],
             ),
-
-            if (inlineErr != null) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: KiwiTheme.hostileBg.withValues(alpha: 0.25),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: KiwiTheme.hostileBorder.withValues(alpha: 0.6)),
+            subtitle: Text(
+              "${ap.bssid} • ${ap.rssi} dBm",
+              style: textTheme.bodySmall,
+            ),
+          ),
+          if (inlineErr != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      inlineErr,
+                      style: const TextStyle(color: Colors.red, fontSize: 12),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: isConnectingToThis ? null : () => _connectToNetwork(ap),
+                    child: const Text("Retry"),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: (isConnectingToThis || _isVerifying) ? null : () => _connectToNetwork(ap),
+                  child: Text(isConnectingToThis ? "Connecting..." : "Connect"),
                 ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(inlineErr, style: const TextStyle(fontSize: 11, color: Color(0xFFFECACA))),
-                    ),
-                    TextButton(
-                      style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 30)),
-                      onPressed: isConnectingToThis ? null : () => _connectToNetwork(ap),
-                      child: const Text("Retry", style: TextStyle(color: KiwiTheme.tealAccent, fontWeight: FontWeight.bold, fontSize: 12)),
-                    ),
-                  ],
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _isVerifying ? null : () => _verifyGateway(ssid: ap.ssid, bssid: ap.bssid),
+                  child: Text(_isVerifying ? "Verifying..." : "Verify"),
                 ),
               ),
             ],
-
-            const SizedBox(height: 12),
-
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: KiwiTheme.textPrimary,
-                      side: BorderSide(color: isConnectingToThis ? KiwiTheme.tealAccent : KiwiTheme.surfaceElevated),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                    icon: isConnectingToThis
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: KiwiTheme.tealAccent))
-                        : const Icon(Icons.link, size: 18),
-                    label: Text(
-                      isConnectingToThis ? "Connecting..." : (isConnectedToThis ? "Connected" : "Connect"),
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                    onPressed: (isConnectingToThis || _isVerifying) ? null : () => _connectToNetwork(ap),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: KiwiTheme.tealAccent,
-                      foregroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                    icon: _isVerifying
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                        : const Icon(Icons.shield_outlined, size: 18),
-                    label: Text(
-                      _isVerifying ? "Verifying..." : "Verify",
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                    onPressed: _isVerifying ? null : () => _verifyGateway(ssid: ap.ssid, bssid: ap.bssid),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
