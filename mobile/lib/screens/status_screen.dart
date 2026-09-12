@@ -113,32 +113,32 @@ class _StatusScreenState extends State<StatusScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top Header: Kiwi Badge + Logo Text
-              Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.psychology_alt_rounded,
+              // Top Action Row (Clean back button, top left logo removed)
+              InkWell(
+                onTap: () => Navigator.pop(context, _result),
+                borderRadius: BorderRadius.circular(22),
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.8),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.arrow_back_ios_new_rounded,
+                      size: 18,
                       color: KiwiTheme.charcoal,
-                      size: 24,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    "Kiwi",
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: KiwiTheme.charcoal,
-                    ),
-                  ),
-                ],
+                ),
               ),
 
               const Spacer(),
