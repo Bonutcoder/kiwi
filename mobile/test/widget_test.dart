@@ -10,17 +10,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('MyApp loads and renders KIWI verifier screen', (WidgetTester tester) async {
+  testWidgets('KiwiApp loads and renders mobile dashboard', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
     final cryptoService = CryptoService();
     final storageService = StorageService(cryptoService, inMemorySecureStorage: {});
     await storageService.init();
     final networkService = NetworkService(cryptoService, storageService);
 
-    await tester.pumpWidget(MyApp(networkService: networkService));
+    await tester.pumpWidget(KiwiApp(networkService: networkService));
     await tester.pump();
 
-    expect(find.text('KIWI'), findsOneWidget);
-    expect(find.text('Verify Gateway'), findsOneWidget);
+    expect(find.textContaining("Hi User"), findsOneWidget);
+    expect(find.text('Kiwi Scan'), findsOneWidget);
   });
 }
