@@ -1,4 +1,4 @@
-# SentinelNet: Hardware-Verified Wi-Fi Trust Anchor 🛡️📶
+# Kiwi 🛡️📶
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Flutter](https://img.shields.io/badge/Flutter-Client-02569B?logo=flutter)](https://flutter.dev)
