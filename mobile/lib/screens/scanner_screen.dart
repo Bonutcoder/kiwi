@@ -1,9 +1,10 @@
 // KIWI Wi-Fi Scanner & Gateway Authenticator
-// Explicitly requests Android Location & Nearby Wi-Fi permissions, queries active connected Wi-Fi interface, and scans live nearby APs.
+// Handles permission rationale, hardware Wi-Fi scanning (filtered to open networks),
+// per-card connection loading with inline error handling, persistent connected SSID bar,
+// and mutual authentication verification flow.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:network_info_plus/network_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
@@ -29,17 +30,37 @@ class ScannerScreen extends StatefulWidget {
 
 class _ScannerScreenState extends State<ScannerScreen> {
   bool _isScanning = false;
+  bool _isVerifying = false;
   List<ApScanItem> _accessPoints = [];
+  String? _connectingSsid;
+  String? _connectedSsid;
+  String? _connectedBssid;
+  final Map<String, String> _inlineErrors = {};
   String? _statusMessage;
   bool _permissionDenied = false;
-  final NetworkInfo _networkInfo = NetworkInfo();
 
   @override
   void initState() {
     super.initState();
-    _requestPermissionsAndScan();
+    _refreshConnectedState();
+    if (widget.autoScan) {
+      _requestPermissionsAndScan();
+    }
   }
 
+  /// Refreshes the currently connected network status from network_info_plus
+  Future<void> _refreshConnectedState() async {
+    final ssid = await widget.networkService.getConnectedWifiSsid();
+    final bssid = await widget.networkService.getConnectedWifiBssid();
+    if (mounted) {
+      setState(() {
+        _connectedSsid = ssid;
+        _connectedBssid = bssid;
+      });
+    }
+  }
+
+  /// 1. Request Runtime Permissions with Rationale Dialog if denied
   Future<void> _requestPermissionsAndScan() async {
     setState(() {
       _isScanning = true;
@@ -47,7 +68,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
       _permissionDenied = false;
     });
 
-    // 1. Request Runtime Android Location & Nearby Devices Permissions
+    await _refreshConnectedState();
+
     final locStatus = await Permission.location.request();
     await Permission.nearbyWifiDevices.request();
 
@@ -58,6 +80,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
           _isScanning = false;
           _statusMessage = "Location permission is required by Android to discover nearby Wi-Fi networks.";
         });
+        _showPermissionRationaleDialog();
       }
       return;
     }
@@ -65,32 +88,64 @@ class _ScannerScreenState extends State<ScannerScreen> {
     await _performRealScan();
   }
 
+  /// Displays clear Rationale Dialog explaining why permissions are required
+  void _showPermissionRationaleDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: KiwiTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.location_on, color: KiwiTheme.tealAccent, size: 24),
+            SizedBox(width: 10),
+            Text("Location Required", style: TextStyle(color: KiwiTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: const Text(
+          "Android requires Location & Nearby Wi-Fi permissions to scan nearby wireless access points. "
+          "Without this permission, hardware Wi-Fi scans cannot detect nearby gateways.",
+          style: TextStyle(color: KiwiTheme.textSecondary, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            child: const Text("Cancel", style: TextStyle(color: KiwiTheme.textMuted)),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: KiwiTheme.tealAccent,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text("Grant Permission", style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () {
+              Navigator.of(context).pop();
+              openAppSettings();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 2. Perform Hardware Wi-Fi Scan - Filtered strictly to OPEN / UNENCRYPTED networks
   Future<void> _performRealScan() async {
-    final List<ApScanItem> realAps = [];
+    final List<ApScanItem> openAps = [];
     String? diagMsg;
 
-    // 2. Query currently connected Wi-Fi interface
-    try {
-      final connectedSsid = await _networkInfo.getWifiName();
-      final connectedBssid = await _networkInfo.getWifiBSSID();
+    // Add current active interface if present
+    if (_connectedSsid != null && _connectedSsid!.isNotEmpty) {
+      openAps.add(
+        ApScanItem(
+          ssid: _connectedSsid!,
+          bssid: _connectedBssid ?? "00:00:00:00:00:00",
+          rssi: -35,
+          isOpen: true,
+          isTargetKiwiZone: _connectedSsid == kTargetSoftApSsid,
+        ),
+      );
+    }
 
-      if (connectedSsid != null && connectedSsid.isNotEmpty) {
-        final cleanSsid = connectedSsid.replaceAll('"', '').trim();
-        if (cleanSsid.isNotEmpty && cleanSsid != "<unknown ssid>") {
-          realAps.add(
-            ApScanItem(
-              ssid: cleanSsid,
-              bssid: connectedBssid ?? "00:00:00:00:00:00",
-              rssi: -35,
-              isOpen: true,
-              isTargetKiwiZone: cleanSsid == kTargetSoftApSsid,
-            ),
-          );
-        }
-      }
-    } catch (_) {}
-
-    // 3. Perform Hardware Wi-Fi Scan & Check Detailed System State
     try {
       final canStart = await WiFiScan.instance.canStartScan(askPermissions: true);
       switch (canStart) {
@@ -98,15 +153,14 @@ class _ScannerScreenState extends State<ScannerScreen> {
           await WiFiScan.instance.startScan();
           break;
         case CanStartScan.noLocationServiceDisabled:
-          diagMsg = "Location (GPS) is turned OFF in phone settings. Android strictly requires Location service to be ON to scan nearby Wi-Fi networks.";
+          diagMsg = "Location (GPS) is turned OFF in phone settings. Turn ON Location (GPS) in your top control shade to scan Wi-Fi.";
           break;
         case CanStartScan.noLocationPermissionDenied:
         case CanStartScan.noLocationPermissionRequired:
-          diagMsg = "Location permission was denied. Please grant Location permission in App Settings.";
+          diagMsg = "Location permission was denied.";
           _permissionDenied = true;
           break;
         default:
-          diagMsg = "Wi-Fi scan status ($canStart). Fetching available scan results...";
           break;
       }
 
@@ -118,28 +172,25 @@ class _ScannerScreenState extends State<ScannerScreen> {
           final ssidStr = ap.ssid.trim();
           if (ssidStr.isEmpty || ssidStr == "<Hidden Network>") continue;
 
-          if (!realAps.any((item) => item.ssid == ssidStr || item.bssid == ap.bssid)) {
-            realAps.add(ApScanItem(
-              ssid: ssidStr,
-              bssid: ap.bssid,
-              rssi: ap.level,
-              isOpen: !ap.capabilities.contains("WPA") && !ap.capabilities.contains("WEP"),
-              isTargetKiwiZone: ssidStr == kTargetSoftApSsid,
-            ));
+          // FILTER: Show OPEN / UNENCRYPTED networks as specified in requirement 1
+          final isOpen = !ap.capabilities.contains("WPA") && !ap.capabilities.contains("WEP");
+          if (!isOpen && ssidStr != kTargetSoftApSsid) continue;
+
+          if (!openAps.any((item) => item.ssid == ssidStr || item.bssid == ap.bssid)) {
+            openAps.add(
+              ApScanItem(
+                ssid: ssidStr,
+                bssid: ap.bssid,
+                rssi: ap.level,
+                isOpen: isOpen,
+                isTargetKiwiZone: ssidStr == kTargetSoftApSsid,
+              ),
+            );
           }
         }
       } else if (diagMsg == null) {
-        switch (canGet) {
-          case CanGetScannedResults.noLocationServiceDisabled:
-            diagMsg = "Location (GPS) is turned OFF in phone settings. Please turn ON Location (GPS) in your phone's drop-down quick settings shade to scan Wi-Fi.";
-            break;
-          case CanGetScannedResults.noLocationPermissionDenied:
-            diagMsg = "Location permission is required by Android to scan Wi-Fi networks.";
-            _permissionDenied = true;
-            break;
-          default:
-            diagMsg = "Unable to retrieve Wi-Fi scan results ($canGet).";
-            break;
+        if (canGet == CanGetScannedResults.noLocationServiceDisabled) {
+          diagMsg = "Location (GPS) is turned OFF in phone settings. Turn ON Location in top control shade to scan Wi-Fi.";
         }
       }
     } catch (e) {
@@ -149,54 +200,65 @@ class _ScannerScreenState extends State<ScannerScreen> {
     if (!mounted) return;
 
     setState(() {
-      _accessPoints = realAps;
+      _accessPoints = openAps;
       _isScanning = false;
       if (diagMsg != null) {
         _statusMessage = diagMsg;
-      } else if (realAps.isEmpty) {
-        _statusMessage = "No nearby Wi-Fi networks detected. Make sure Location (GPS) is turned ON in your phone's top control shade and tap 'Scan Wi-Fi Networks'.";
+      } else if (openAps.isEmpty) {
+        _statusMessage = "No open Wi-Fi networks found nearby.";
       }
     });
   }
 
+  /// 3. Connect to a specific Wi-Fi Network with per-card loading & inline error handling
+  Future<void> _connectToNetwork(ApScanItem ap) async {
+    setState(() {
+      _connectingSsid = ap.ssid;
+      _inlineErrors.remove(ap.ssid);
+    });
 
+    final success = await widget.networkService.connectToWifi(ap.ssid);
+    await _refreshConnectedState();
 
-  void _connectToNetwork(ApScanItem ap) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: KiwiTheme.surface,
-        content: Row(
-          children: [
-            const Icon(Icons.wifi, color: KiwiTheme.tealAccent, size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                "To connect to '${ap.ssid}', select it in your device's Wi-Fi Settings.",
-                style: const TextStyle(color: KiwiTheme.textPrimary, fontSize: 13),
-              ),
-            ),
-          ],
-        ),
-        duration: const Duration(seconds: 4),
-      ),
-    );
+    if (!mounted) return;
+
+    setState(() {
+      _connectingSsid = null;
+      if (!success && _connectedSsid != ap.ssid) {
+        _inlineErrors[ap.ssid] = "Could not verify connection to '${ap.ssid}'. Ensure network is selected in Wi-Fi settings and retry.";
+      } else {
+        _inlineErrors.remove(ap.ssid);
+      }
+    });
   }
 
-  void _verifyGateway({
+  /// 4. Mutual Handshake Verification Trigger
+  Future<void> _verifyGateway({
     required String ssid,
     required String bssid,
-  }) {
-    Navigator.of(context).push(
+  }) async {
+    setState(() {
+      _isVerifying = true;
+    });
+
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => StatusScreen(
           networkService: widget.networkService,
           ssid: ssid,
-          bssid: bssid,
+          bssid: bssid.isEmpty ? "00:00:00:00:00:00" : bssid,
           gatewayHost: kDefaultGatewayHost,
         ),
       ),
     );
+
+    // Reset flow cleanly on returning from StatusScreen
+    await _refreshConnectedState();
+    if (mounted) {
+      setState(() {
+        _isVerifying = false;
+      });
+    }
   }
 
   @override
@@ -214,15 +276,36 @@ class _ScannerScreenState extends State<ScannerScreen> {
               child: const Icon(Icons.shield_outlined, color: KiwiTheme.tealAccent, size: 22),
             ),
             const SizedBox(width: 12),
-            const Column(
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("KIWI", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-                Text("Wi-Fi Safety Companion", style: TextStyle(fontSize: 11, color: KiwiTheme.textSecondary)),
+                const Text("KIWI", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                Text(
+                  _connectedSsid != null ? "Connected: $_connectedSsid" : "Wi-Fi Safety Companion",
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _connectedSsid != null ? KiwiTheme.tealAccent : KiwiTheme.textSecondary,
+                    fontWeight: _connectedSsid != null ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
               ],
             ),
           ],
         ),
+        actions: [
+          // Requirement 1: Rescan Icon Button in AppBar
+          IconButton(
+            tooltip: "Rescan Wi-Fi Networks",
+            icon: _isScanning
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: KiwiTheme.tealAccent),
+                  )
+                : const Icon(Icons.refresh, color: KiwiTheme.tealAccent),
+            onPressed: (_isScanning || _connectingSsid != null || _isVerifying) ? null : _requestPermissionsAndScan,
+          ),
+        ],
       ),
       body: SafeArea(
         child: Padding(
@@ -230,16 +313,16 @@ class _ScannerScreenState extends State<ScannerScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Primary Scan Card
-              _buildScanCard(),
-              const SizedBox(height: 16),
+              // Requirement 2 & 3: Persistent Active Connection Status Bar
+              _buildConnectedStatusBar(),
+              const SizedBox(height: 14),
 
-              // Discovered Wi-Fi Header
+              // Discovered Networks Section Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    "Discovered Wi-Fi Networks (${_accessPoints.length})",
+                    "Open Wi-Fi Networks (${_accessPoints.length})",
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -271,13 +354,13 @@ class _ScannerScreenState extends State<ScannerScreen> {
                       const SizedBox(width: 10),
                       const Expanded(
                         child: Text(
-                          "Location permission is required for Wi-Fi scanning.",
+                          "Location permission is required to scan open networks.",
                           style: TextStyle(fontSize: 12, color: Colors.white),
                         ),
                       ),
                       TextButton(
+                        onPressed: _showPermissionRationaleDialog,
                         child: const Text("Grant", style: TextStyle(color: KiwiTheme.tealAccent, fontWeight: FontWeight.bold)),
-                        onPressed: () => openAppSettings(),
                       ),
                     ],
                   ),
@@ -306,69 +389,28 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   ),
                 ),
 
-              // Direct "Verify KIWI Gateway (192.168.4.1)" Action Button
-              Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: KiwiTheme.surface,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: KiwiTheme.tealAccent.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.router_outlined, color: KiwiTheme.tealAccent, size: 22),
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("Connected Gateway", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: KiwiTheme.textPrimary)),
-                          Text("Verify active SoftAP at 192.168.4.1", style: TextStyle(fontSize: 11, color: KiwiTheme.textSecondary)),
-                        ],
-                      ),
-                    ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: KiwiTheme.tealAccent,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      ),
-                      child: const Text("Verify Now", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                      onPressed: () => _verifyGateway(ssid: kTargetSoftApSsid, bssid: "ESP32:GW:01"),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Real Networks List
+              // Open Networks List or Empty State
               Expanded(
-                child: _accessPoints.isEmpty && !_isScanning
-                    ? Center(
+                child: _isScanning
+                    ? const Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.wifi_off, size: 48, color: KiwiTheme.textMuted.withValues(alpha: 0.5)),
-                            const SizedBox(height: 12),
-                            const Text(
-                              "No Wi-Fi Networks Discovered",
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: KiwiTheme.textSecondary),
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              "Ensure Location & Wi-Fi are ON, then tap 'Scan Wi-Fi Networks'.",
-                              style: TextStyle(fontSize: 12, color: KiwiTheme.textMuted),
-                            ),
+                            CircularProgressIndicator(color: KiwiTheme.tealAccent),
+                            SizedBox(height: 14),
+                            Text("Scanning for open Wi-Fi networks...", style: TextStyle(color: KiwiTheme.textSecondary, fontSize: 13)),
                           ],
                         ),
                       )
-                    : ListView.builder(
-                        itemCount: _accessPoints.length,
-                        itemBuilder: (context, index) {
-                          final ap = _accessPoints[index];
-                          return _buildApCard(ap);
-                        },
-                      ),
+                    : _accessPoints.isEmpty
+                        ? _buildEmptyState()
+                        : ListView.builder(
+                            itemCount: _accessPoints.length,
+                            itemBuilder: (context, index) {
+                              final ap = _accessPoints[index];
+                              return _buildApCard(ap);
+                            },
+                          ),
               ),
             ],
           ),
@@ -377,100 +419,173 @@ class _ScannerScreenState extends State<ScannerScreen> {
     );
   }
 
-  Widget _buildScanCard() {
+  /// Persistent Connected Status Bar above the list
+  Widget _buildConnectedStatusBar() {
+    final isConnected = _connectedSsid != null && _connectedSsid!.isNotEmpty;
+
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: KiwiTheme.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: KiwiTheme.tealAccent.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isConnected ? KiwiTheme.tealAccent.withValues(alpha: 0.6) : KiwiTheme.surfaceElevated,
+          width: isConnected ? 1.5 : 1.0,
+        ),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.wifi_find_rounded, color: KiwiTheme.tealAccent, size: 24),
-              SizedBox(width: 10),
-              Text(
-                "Wi-Fi Security Scanner",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: KiwiTheme.textPrimary),
+              Icon(
+                isConnected ? Icons.wifi : Icons.wifi_off,
+                color: isConnected ? KiwiTheme.tealAccent : KiwiTheme.textMuted,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isConnected ? _connectedSsid! : "Not Connected to Wi-Fi",
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: KiwiTheme.textPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isConnected ? "Active Gateway IP: $kDefaultGatewayHost" : "Connect to an open network below to challenge gateway",
+                      style: const TextStyle(fontSize: 11, color: KiwiTheme.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isConnected ? KiwiTheme.tealAccent.withValues(alpha: 0.15) : KiwiTheme.background,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: isConnected ? KiwiTheme.tealAccent : KiwiTheme.textMuted.withValues(alpha: 0.3)),
+                ),
+                child: Text(
+                  isConnected ? "ACTIVE" : "OFFLINE",
+                  style: TextStyle(
+                    color: isConnected ? KiwiTheme.tealAccent : KiwiTheme.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ],
           ),
+          if (isConnected) ...[
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: KiwiTheme.tealAccent,
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: _isVerifying
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
+                      )
+                    : const Icon(Icons.shield_outlined, size: 20),
+                label: Text(
+                  _isVerifying ? "Verifying Gateway..." : "Verify Connected Gateway",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                onPressed: (_isVerifying || _connectingSsid != null)
+                    ? null
+                    : () => _verifyGateway(ssid: _connectedSsid!, bssid: _connectedBssid ?? ""),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Empty State Widget
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.wifi_off_rounded, size: 54, color: KiwiTheme.textMuted.withValues(alpha: 0.4)),
+          const SizedBox(height: 14),
+          const Text(
+            "No Open Wi-Fi Networks Found",
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: KiwiTheme.textSecondary),
+          ),
           const SizedBox(height: 6),
           const Text(
-            "Scan all real nearby Wi-Fi networks. Connect to a network or verify its gateway authenticity.",
-            style: TextStyle(fontSize: 12, color: KiwiTheme.textSecondary, height: 1.3),
+            "Only unencrypted open networks are displayed for gateway testing.\nEnsure Wi-Fi & Location (GPS) are ON.",
+            style: TextStyle(fontSize: 12, color: KiwiTheme.textMuted, height: 1.3),
+            textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 14),
-
-          // Large Scan Button
-          SizedBox(
-            height: 48,
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: KiwiTheme.tealAccent,
-                foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              icon: _isScanning
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.black),
-                    )
-                  : const Icon(Icons.search, size: 20),
-              label: Text(
-                _isScanning ? "Scanning Networks..." : "Scan Wi-Fi Networks",
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-              ),
-              onPressed: _isScanning ? null : _requestPermissionsAndScan,
+          const SizedBox(height: 18),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: KiwiTheme.tealAccent,
+              side: const BorderSide(color: KiwiTheme.tealAccent),
             ),
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text("Rescan", style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: _requestPermissionsAndScan,
           ),
         ],
       ),
     );
   }
 
+  /// Individual Open Network Card
   Widget _buildApCard(ApScanItem ap) {
+    final isConnectedToThis = _connectedSsid == ap.ssid;
+    final isConnectingToThis = _connectingSsid == ap.ssid;
+    final inlineErr = _inlineErrors[ap.ssid];
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: KiwiTheme.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: ap.isTargetKiwiZone
-              ? KiwiTheme.tealAccent.withValues(alpha: 0.5)
-              : KiwiTheme.surfaceElevated,
-          width: ap.isTargetKiwiZone ? 1.5 : 1.0,
+          color: isConnectedToThis
+              ? KiwiTheme.tealAccent
+              : ap.isTargetKiwiZone
+                  ? KiwiTheme.tealAccent.withValues(alpha: 0.5)
+                  : KiwiTheme.surfaceElevated,
+          width: isConnectedToThis ? 1.8 : 1.0,
         ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
-                // Wi-Fi Icon
                 Container(
                   width: 42,
                   height: 42,
                   decoration: BoxDecoration(
-                    color: ap.isTargetKiwiZone
-                        ? KiwiTheme.tealAccent.withValues(alpha: 0.15)
+                    color: isConnectedToThis
+                        ? KiwiTheme.tealAccent.withValues(alpha: 0.18)
                         : KiwiTheme.background,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     Icons.wifi,
-                    color: ap.isTargetKiwiZone ? KiwiTheme.tealAccent : KiwiTheme.textMuted,
+                    color: isConnectedToThis ? KiwiTheme.tealAccent : KiwiTheme.textMuted,
                     size: 22,
                   ),
                 ),
                 const SizedBox(width: 12),
-
-                // Details
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -480,11 +595,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                           Expanded(
                             child: Text(
                               ap.ssid,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: KiwiTheme.textPrimary,
-                              ),
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: KiwiTheme.textPrimary),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -511,18 +622,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
                             style: const TextStyle(fontSize: 11, color: KiwiTheme.textMuted, fontFamily: 'monospace'),
                           ),
                           const SizedBox(width: 10),
-                          Text(
-                            "${ap.rssi} dBm",
-                            style: const TextStyle(fontSize: 11, color: KiwiTheme.textMuted),
-                          ),
+                          Text("${ap.rssi} dBm", style: const TextStyle(fontSize: 11, color: KiwiTheme.textMuted)),
                           const SizedBox(width: 10),
-                          Text(
-                            ap.isOpen ? "Open" : "Secured",
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: ap.isOpen ? Colors.amber : KiwiTheme.textSecondary,
-                            ),
-                          ),
+                          const Text("Open", style: TextStyle(fontSize: 11, color: Colors.amber)),
                         ],
                       ),
                     ],
@@ -530,40 +632,75 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 ),
               ],
             ),
+
+            // Inline Error Banner if connection attempt failed
+            if (inlineErr != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: KiwiTheme.hostileBg.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: KiwiTheme.hostileBorder.withValues(alpha: 0.6)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        inlineErr,
+                        style: const TextStyle(fontSize: 11, color: Color(0xFFFECACA), height: 1.3),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    TextButton(
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: const Size(50, 30)),
+                      onPressed: isConnectingToThis ? null : () => _connectToNetwork(ap),
+                      child: const Text("Retry", style: TextStyle(color: KiwiTheme.tealAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 12),
 
-            // Action Buttons: Connect & Verify
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: KiwiTheme.textPrimary,
-                      side: const BorderSide(color: KiwiTheme.surfaceElevated),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                    icon: const Icon(Icons.link, size: 16),
-                    label: const Text("Connect", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                    onPressed: () => _connectToNetwork(ap),
-                  ),
+            // Action Buttons based on state
+            if (isConnectedToThis)
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: KiwiTheme.tealAccent,
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: ap.isTargetKiwiZone ? KiwiTheme.tealAccent : KiwiTheme.surfaceElevated,
-                      foregroundColor: ap.isTargetKiwiZone ? Colors.black : KiwiTheme.textPrimary,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                    icon: const Icon(Icons.shield_outlined, size: 16),
-                    label: const Text("Verify Gateway", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                    onPressed: () => _verifyGateway(ssid: ap.ssid, bssid: ap.bssid),
-                  ),
+                icon: _isVerifying
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                    : const Icon(Icons.shield_outlined, size: 18),
+                label: Text(
+                  _isVerifying ? "Verifying Gateway..." : "Verify Gateway",
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                 ),
-              ],
-            ),
+                onPressed: _isVerifying ? null : () => _verifyGateway(ssid: ap.ssid, bssid: ap.bssid),
+              )
+            else
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: KiwiTheme.textPrimary,
+                  side: BorderSide(color: isConnectingToThis ? KiwiTheme.tealAccent : KiwiTheme.surfaceElevated),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                icon: isConnectingToThis
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: KiwiTheme.tealAccent))
+                    : const Icon(Icons.link, size: 18),
+                label: Text(
+                  isConnectingToThis ? "Connecting to ${ap.ssid}..." : "Connect",
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                onPressed: (_connectingSsid != null || _isVerifying) ? null : () => _connectToNetwork(ap),
+              ),
           ],
         ),
       ),

@@ -5,7 +5,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:network_info_plus/network_info_plus.dart';
 import '../constants/security_constants.dart';
 import '../models/verification_models.dart';
 import 'crypto_service.dart';
@@ -25,12 +27,60 @@ class NetworkService {
   final CryptoService _cryptoService;
   final StorageService _storageService;
   final http.Client _httpClient;
+  final NetworkInfo _networkInfo = NetworkInfo();
+  static const _wifiChannel = MethodChannel('com.kiwi.companion/wifi');
 
   NetworkService(
     this._cryptoService,
     this._storageService, {
     http.Client? httpClient,
   }) : _httpClient = httpClient ?? http.Client();
+
+  /// Gets the currently connected Wi-Fi SSID from network_info_plus
+  Future<String?> getConnectedWifiSsid() async {
+    try {
+      final name = await _networkInfo.getWifiName();
+      if (name == null || name.isEmpty) return null;
+      final clean = name.replaceAll('"', '').trim();
+      if (clean.isEmpty || clean == "<unknown ssid>") return null;
+      return clean;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Gets the currently connected Wi-Fi BSSID
+  Future<String?> getConnectedWifiBssid() async {
+    try {
+      return await _networkInfo.getWifiBSSID();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Attempts to connect to target Wi-Fi network and polls connected SSID
+  Future<bool> connectToWifi(String targetSsid, {Duration timeout = const Duration(seconds: 15)}) async {
+    final current = await getConnectedWifiSsid();
+    if (current == targetSsid) {
+      return true;
+    }
+
+    try {
+      await _wifiChannel.invokeMethod('openWifiSettings');
+    } catch (_) {}
+
+    final endTime = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(endTime)) {
+      await Future.delayed(const Duration(seconds: 1));
+      final updated = await getConnectedWifiSsid();
+      if (updated == targetSsid) {
+        return true;
+      }
+    }
+
+    final finalSsid = await getConnectedWifiSsid();
+    return finalSsid == targetSsid;
+  }
 
   /// Performs the complete 2-directional, 4-layer mutual authentication handshake
   Future<HandshakeResult> performMutualHandshake({
