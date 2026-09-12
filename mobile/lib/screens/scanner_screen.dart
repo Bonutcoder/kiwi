@@ -1,9 +1,10 @@
 // KIWI Wi-Fi Scanner & Gateway Authenticator
-// Displays ONLY REAL, live nearby Wi-Fi networks with direct Connect & Gateway Verification actions. Zero fake entries.
+// Explicitly requests Android Location & Nearby Wi-Fi permissions, queries active connected Wi-Fi interface, and scans live nearby APs.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:wifi_scan/wifi_scan.dart';
 
 import '../constants/security_constants.dart';
@@ -30,27 +31,83 @@ class _ScannerScreenState extends State<ScannerScreen> {
   bool _isScanning = false;
   List<ApScanItem> _accessPoints = [];
   String? _statusMessage;
+  bool _permissionDenied = false;
   final NetworkInfo _networkInfo = NetworkInfo();
 
   @override
   void initState() {
     super.initState();
-    _startScan();
+    _requestPermissionsAndScan();
   }
 
-  Future<void> _startScan() async {
+  Future<void> _requestPermissionsAndScan() async {
     setState(() {
       _isScanning = true;
       _statusMessage = null;
+      _permissionDenied = false;
     });
 
-    final List<ApScanItem> realAps = [];
+    // 1. Request Runtime Android Location & Nearby Devices Permissions
+    final locStatus = await Permission.location.request();
+    await Permission.nearbyWifiDevices.request();
 
+    if (locStatus.isDenied || locStatus.isPermanentlyDenied) {
+      if (mounted) {
+        setState(() {
+          _permissionDenied = true;
+          _isScanning = false;
+          _statusMessage = "Location permission is required by Android to discover nearby Wi-Fi networks.";
+        });
+      }
+      return;
+    }
+
+    await _performRealScan();
+  }
+
+  Future<void> _performRealScan() async {
+    final List<ApScanItem> realAps = [];
+    String? diagMsg;
+
+    // 2. Query currently connected Wi-Fi interface
     try {
-      // 1. Try Hardware Wi-Fi Scan
+      final connectedSsid = await _networkInfo.getWifiName();
+      final connectedBssid = await _networkInfo.getWifiBSSID();
+
+      if (connectedSsid != null && connectedSsid.isNotEmpty) {
+        final cleanSsid = connectedSsid.replaceAll('"', '').trim();
+        if (cleanSsid.isNotEmpty && cleanSsid != "<unknown ssid>") {
+          realAps.add(
+            ApScanItem(
+              ssid: cleanSsid,
+              bssid: connectedBssid ?? "00:00:00:00:00:00",
+              rssi: -35,
+              isOpen: true,
+              isTargetKiwiZone: cleanSsid == kTargetSoftApSsid,
+            ),
+          );
+        }
+      }
+    } catch (_) {}
+
+    // 3. Perform Hardware Wi-Fi Scan & Check Detailed System State
+    try {
       final canStart = await WiFiScan.instance.canStartScan(askPermissions: true);
-      if (canStart == CanStartScan.yes) {
-        await WiFiScan.instance.startScan();
+      switch (canStart) {
+        case CanStartScan.yes:
+          await WiFiScan.instance.startScan();
+          break;
+        case CanStartScan.noLocationServiceDisabled:
+          diagMsg = "Location (GPS) is turned OFF in phone settings. Android strictly requires Location service to be ON to scan nearby Wi-Fi networks.";
+          break;
+        case CanStartScan.noLocationPermissionDenied:
+        case CanStartScan.noLocationPermissionRequired:
+          diagMsg = "Location permission was denied. Please grant Location permission in App Settings.";
+          _permissionDenied = true;
+          break;
+        default:
+          diagMsg = "Wi-Fi scan status ($canStart). Fetching available scan results...";
+          break;
       }
 
       final canGet = await WiFiScan.instance.canGetScannedResults(askPermissions: true);
@@ -61,41 +118,32 @@ class _ScannerScreenState extends State<ScannerScreen> {
           final ssidStr = ap.ssid.trim();
           if (ssidStr.isEmpty || ssidStr == "<Hidden Network>") continue;
 
-          realAps.add(ApScanItem(
-            ssid: ssidStr,
-            bssid: ap.bssid,
-            rssi: ap.level,
-            isOpen: !ap.capabilities.contains("WPA") && !ap.capabilities.contains("WEP"),
-            isTargetKiwiZone: ssidStr == kTargetSoftApSsid,
-          ));
+          if (!realAps.any((item) => item.ssid == ssidStr || item.bssid == ap.bssid)) {
+            realAps.add(ApScanItem(
+              ssid: ssidStr,
+              bssid: ap.bssid,
+              rssi: ap.level,
+              isOpen: !ap.capabilities.contains("WPA") && !ap.capabilities.contains("WEP"),
+              isTargetKiwiZone: ssidStr == kTargetSoftApSsid,
+            ));
+          }
+        }
+      } else if (diagMsg == null) {
+        switch (canGet) {
+          case CanGetScannedResults.noLocationServiceDisabled:
+            diagMsg = "Location (GPS) is turned OFF in phone settings. Please turn ON Location (GPS) in your phone's drop-down quick settings shade to scan Wi-Fi.";
+            break;
+          case CanGetScannedResults.noLocationPermissionDenied:
+            diagMsg = "Location permission is required by Android to scan Wi-Fi networks.";
+            _permissionDenied = true;
+            break;
+          default:
+            diagMsg = "Unable to retrieve Wi-Fi scan results ($canGet).";
+            break;
         }
       }
-    } catch (_) {
-      // Ignore scan exceptions and fallback to active connection query below
-    }
-
-    // 2. Also query currently connected Wi-Fi interface (if any)
-    try {
-      final connectedSsid = await _networkInfo.getWifiName();
-      final connectedBssid = await _networkInfo.getWifiBSSID();
-
-      if (connectedSsid != null && connectedSsid.isNotEmpty) {
-        final cleanSsid = connectedSsid.replaceAll('"', '').trim();
-        if (cleanSsid.isNotEmpty && !realAps.any((item) => item.ssid == cleanSsid)) {
-          realAps.insert(
-            0,
-            ApScanItem(
-              ssid: cleanSsid,
-              bssid: connectedBssid ?? "00:00:00:00:00:00",
-              rssi: -40,
-              isOpen: true,
-              isTargetKiwiZone: cleanSsid == kTargetSoftApSsid,
-            ),
-          );
-        }
-      }
-    } catch (_) {
-      // Ignore connection query exceptions
+    } catch (e) {
+      diagMsg = "Scan error: $e";
     }
 
     if (!mounted) return;
@@ -103,11 +151,15 @@ class _ScannerScreenState extends State<ScannerScreen> {
     setState(() {
       _accessPoints = realAps;
       _isScanning = false;
-      if (realAps.isEmpty) {
-        _statusMessage = "No active Wi-Fi networks detected. Make sure Wi-Fi & Location are enabled on your device, then tap 'Scan Wi-Fi Networks'.";
+      if (diagMsg != null) {
+        _statusMessage = diagMsg;
+      } else if (realAps.isEmpty) {
+        _statusMessage = "No nearby Wi-Fi networks detected. Make sure Location (GPS) is turned ON in your phone's top control shade and tap 'Scan Wi-Fi Networks'.";
       }
     });
   }
+
+
 
   void _connectToNetwork(ApScanItem ap) {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -178,7 +230,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Primary Scan Action Card
+              // Primary Scan Card
               _buildScanCard(),
               const SizedBox(height: 16),
 
@@ -187,7 +239,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    "Real Wi-Fi Networks (${_accessPoints.length})",
+                    "Discovered Wi-Fi Networks (${_accessPoints.length})",
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -204,8 +256,36 @@ class _ScannerScreenState extends State<ScannerScreen> {
               ),
               const SizedBox(height: 10),
 
-              if (_statusMessage != null)
+              if (_permissionDenied)
                 Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: KiwiTheme.hostileBg.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: KiwiTheme.hostileBorder.withValues(alpha: 0.5)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 22),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Text(
+                          "Location permission is required for Wi-Fi scanning.",
+                          style: TextStyle(fontSize: 12, color: Colors.white),
+                        ),
+                      ),
+                      TextButton(
+                        child: const Text("Grant", style: TextStyle(color: KiwiTheme.tealAccent, fontWeight: FontWeight.bold)),
+                        onPressed: () => openAppSettings(),
+                      ),
+                    ],
+                  ),
+                ),
+
+              if (_statusMessage != null && !_permissionDenied)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: KiwiTheme.surface,
@@ -226,6 +306,41 @@ class _ScannerScreenState extends State<ScannerScreen> {
                   ),
                 ),
 
+              // Direct "Verify KIWI Gateway (192.168.4.1)" Action Button
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: KiwiTheme.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: KiwiTheme.tealAccent.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.router_outlined, color: KiwiTheme.tealAccent, size: 22),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text("Connected Gateway", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: KiwiTheme.textPrimary)),
+                          Text("Verify active SoftAP at 192.168.4.1", style: TextStyle(fontSize: 11, color: KiwiTheme.textSecondary)),
+                        ],
+                      ),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: KiwiTheme.tealAccent,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      ),
+                      child: const Text("Verify Now", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      onPressed: () => _verifyGateway(ssid: kTargetSoftApSsid, bssid: "ESP32:GW:01"),
+                    ),
+                  ],
+                ),
+              ),
+
               // Real Networks List
               Expanded(
                 child: _accessPoints.isEmpty && !_isScanning
@@ -241,7 +356,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                             ),
                             const SizedBox(height: 6),
                             const Text(
-                              "Tap 'Scan Wi-Fi Networks' to scan nearby access points.",
+                              "Ensure Location & Wi-Fi are ON, then tap 'Scan Wi-Fi Networks'.",
                               style: TextStyle(fontSize: 12, color: KiwiTheme.textMuted),
                             ),
                           ],
@@ -310,7 +425,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 _isScanning ? "Scanning Networks..." : "Scan Wi-Fi Networks",
                 style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
               ),
-              onPressed: _isScanning ? null : _startScan,
+              onPressed: _isScanning ? null : _requestPermissionsAndScan,
             ),
           ),
         ],
